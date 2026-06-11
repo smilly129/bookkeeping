@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Table, Card, Select, Button, Row, Col, Statistic, Typography, DatePicker } from 'antd';
+import { Table, Card, Button, DatePicker } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
 import { supabase, type Transaction } from '../../lib/supabase';
 import dayjs from 'dayjs';
-
-const { Text, Title } = Typography;
 
 interface UserSummary {
   user_name: string;

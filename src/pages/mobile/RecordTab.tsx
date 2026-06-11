@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Button, Form, Input, TextArea, Selector, DatePicker,
-  ImageUploader, Collapse, Tag, Toast, Dialog, Popup, List,
+  ImageUploader, Collapse, Tag, Toast, Popup,
 } from 'antd-mobile';
-import { RightOutline, AddOutline, CameraOutline } from 'antd-mobile-icons';
+import { AddOutline } from 'antd-mobile-icons';
 import { useAuth } from '../../hooks/useAuth';
 import {
   supabase, type Account, type Transaction,
@@ -380,9 +380,9 @@ export default function RecordTab() {
           <Form.Item label="日期">
             <DatePicker
               value={txDate}
-              onChange={(val) => val && setTxDate(val)}
+              onConfirm={(val) => val && setTxDate(val)}
             >
-              {(_, { label }) => <div>{label}</div>}
+              {(value) => <div>{value ? dayjs(value).format('YYYY-MM-DD') : '选择日期'}</div>}
             </DatePicker>
           </Form.Item>
 
@@ -394,15 +394,14 @@ export default function RecordTab() {
           {/* 凭证照片 */}
           <Form.Item label="📷 凭证照片（可选）">
             <ImageUploader
-              value={imageFile ? [{ url: URL.createObjectURL(imageFile) }] : []}
+              value={imageFile ? [{ url: URL.createObjectURL(imageFile), key: 'preview' }] : []}
               onChange={(items) => {
-                if (items.length > 0 && items[0]?.file) {
-                  setImageFile(items[0].file);
-                } else {
-                  setImageFile(null);
-                }
+                if (items.length === 0) setImageFile(null);
               }}
-              upload={async (file) => ({ url: URL.createObjectURL(file) })}
+              upload={async (file) => {
+                setImageFile(file);
+                return { url: URL.createObjectURL(file) };
+              }}
               maxCount={1}
             />
           </Form.Item>
@@ -416,7 +415,7 @@ export default function RecordTab() {
       {/* 历史记录 — 折叠区 */}
       <Collapse defaultActiveKey={[]}>
         <Collapse.Panel key="history" title="📂 历史记录">
-          <HistoryList userId={user?.id || ''} accounts={accounts} />
+          <HistoryList userId={user?.id || ''} />
         </Collapse.Panel>
         <Collapse.Panel key="accounts" title="🏦 我的账户">
           <div style={{ padding: '8px 0' }}>
@@ -481,12 +480,12 @@ export default function RecordTab() {
 }
 
 // 历史记录列表子组件
-function HistoryList({ userId, accounts }: { userId: string; accounts: Account[] }) {
+function HistoryList({ userId }: { userId: string }) {
   const [records, setRecords] = useState<Transaction[]>([]);
-  const [dateRange, setDateRange] = useState<[Date, Date]>([
+  const dateRange: [Date, Date] = [
     dayjs().subtract(30, 'day').toDate(),
     new Date(),
-  ]);
+  ];
 
   useEffect(() => {
     if (!userId) return;

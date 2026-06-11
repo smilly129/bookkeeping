@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Table, Button, Input, Select, DatePicker, Space, Tag, Modal,
-  Form, InputNumber, message, Popconfirm, Image, Typography,
+  Form, InputNumber, message, Popconfirm, Image,
 } from 'antd';
-import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, CameraOutlined } from '@ant-design/icons';
+import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { supabase, type Transaction, CURRENCIES } from '../../lib/supabase';
 import dayjs from 'dayjs';
-
-const { Text } = Typography;
 
 interface TxRow extends Transaction {
   user_name?: string;

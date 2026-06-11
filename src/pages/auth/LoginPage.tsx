@@ -11,26 +11,21 @@ export default function LoginPage() {
   const [mode, setMode] = useState<'check' | 'register'>('check');
   const [inviteCode, setInviteCode] = useState('');
   const [name, setName] = useState('');
-  const [inviteExists, setInviteExists] = useState<boolean | null>(null);
 
-  // 检查邀请码是否存在
   const handleCheckCode = async () => {
     if (!inviteCode.trim()) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('users')
         .select('id, name')
         .eq('invite_code', inviteCode.trim())
         .single();
 
       if (data) {
-        // 找到用户 → 直接登录
-        setInviteExists(true);
         await login(inviteCode.trim(), data.name, false);
         navigate('/');
       } else {
-        // 没找到 → 进入注册流程
         const { data: codeData } = await supabase
           .from('invite_codes')
           .select('id')
@@ -39,22 +34,18 @@ export default function LoginPage() {
           .single();
 
         if (codeData) {
-          setInviteExists(false);
           setMode('register');
         } else {
           Toast.show({ icon: 'fail', content: '邀请码无效或已被使用' });
         }
       }
-    } catch (e) {
-      // 没找到用户 → 尝试注册
-      setInviteExists(false);
+    } catch {
       setMode('register');
     } finally {
       setLoading(false);
     }
   };
 
-  // 注册新用户
   const handleRegister = async () => {
     if (!name.trim()) {
       Toast.show({ icon: 'fail', content: '请输入你的名字' });
@@ -64,7 +55,7 @@ export default function LoginPage() {
     try {
       await login(inviteCode.trim(), name.trim(), true);
       navigate('/');
-    } catch (e) {
+    } catch {
       Toast.show({ icon: 'fail', content: '注册失败，请重试' });
     } finally {
       setLoading(false);
@@ -159,7 +150,7 @@ export default function LoginPage() {
               block
               fill="none"
               size="small"
-              onClick={() => { setMode('check'); setInviteExists(null); }}
+              onClick={() => setMode('check')}
               style={{ marginTop: 8 }}
             >
               换一个邀请码

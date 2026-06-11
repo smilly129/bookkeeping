@@ -4,7 +4,7 @@ import { Layout, Menu, Button, theme } from 'antd';
 import {
   DashboardOutlined, TableOutlined, CheckCircleOutlined,
   WalletOutlined, BarChartOutlined, UserOutlined,
-  SettingOutlined, MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../hooks/useAuth';
 import AdminDashboard from './AdminDashboard';

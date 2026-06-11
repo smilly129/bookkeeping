@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
   Table, Card, Tag, Button, Space, Select, Modal,
-  message, Typography,
+  message,
 } from 'antd';
 import { CheckCircleOutlined, WarningOutlined, EyeOutlined, CheckOutlined } from '@ant-design/icons';
 import { supabase, type Reconciliation } from '../../lib/supabase';
-import dayjs from 'dayjs';
-
-const { Text } = Typography;
 
 interface RecRow extends Reconciliation {
   user_name?: string;

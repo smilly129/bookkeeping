@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Statistic, Row, Col, Tag, Table, Typography } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, WarningOutlined } from '@ant-design/icons';
-import { supabase, type Transaction, CURRENCIES } from '../../lib/supabase';
+import { supabase, type Transaction } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;

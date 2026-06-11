@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Form, Input, TextArea, Selector, Toast, Tag, Collapse } from 'antd-mobile';
+import { Button, Form, Input, TextArea, Toast, Tag, Collapse } from 'antd-mobile';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase, type Account, type Reconciliation, type AccountBalance, ACCOUNT_TYPES } from '../../lib/supabase';
 import dayjs from 'dayjs';

@@ -1,0 +1,106 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('请在 .env 文件中配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    storageKey: 'bookkeep_auth',
+  },
+});
+
+// 数据库类型定义
+export interface User {
+  id: string;
+  name: string;
+  role: 'admin' | 'recorder';
+  invite_code: string;
+  avatar_url?: string;
+  created_at: string;
+}
+
+export interface Account {
+  id: string;
+  user_id: string;
+  account_type: 'domestic_card' | 'international_card' | 'cash' | 'alipay' | 'wechat' | 'crypto';
+  name: string;
+  currency: string;
+  initial_balance: number;
+  created_at: string;
+}
+
+export interface Transaction {
+  id: string;
+  user_id: string;
+  type: 'expense' | 'income' | 'exchange' | 'transfer';
+  direction?: 'domestic' | 'international' | 'outbound' | 'inbound';
+  currency?: string;
+  amount?: number;
+  from_currency?: string;
+  to_currency?: string;
+  from_amount?: number;
+  to_amount?: number;
+  exchange_rate?: number;
+  from_account_id?: string;
+  to_account_id?: string;
+  image_url?: string;
+  notes?: string;
+  transaction_date: string;
+  created_at: string;
+  updated_at?: string;
+  updated_by?: string;
+  is_deleted: boolean;
+}
+
+export interface Reconciliation {
+  id: string;
+  user_id: string;
+  account_id: string;
+  reconcile_date: string;
+  system_balance: number;
+  actual_balance: number;
+  difference: number;
+  notes?: string;
+  submitted_by: string;
+  status: 'pending' | 'matched' | 'mismatch' | 'resolved';
+  created_at: string;
+}
+
+export interface InviteCode {
+  id: string;
+  code: string;
+  created_by: string;
+  used_by?: string;
+  is_used: boolean;
+  created_at: string;
+}
+
+// 账户余额视图
+export interface AccountBalance {
+  account_id: string;
+  user_id: string;
+  account_type: string;
+  name: string;
+  currency: string;
+  initial_balance: number;
+  current_balance: number;
+}
+
+// 账户类型配置
+export const ACCOUNT_TYPES = [
+  { value: 'domestic_card', label: '国内银行卡', icon: '🏦' },
+  { value: 'international_card', label: '国外银行卡', icon: '🏦' },
+  { value: 'cash', label: '现金', icon: '💵' },
+  { value: 'alipay', label: '支付宝', icon: '📱' },
+  { value: 'wechat', label: '微信支付', icon: '💬' },
+  { value: 'crypto', label: '加密货币', icon: '₿' },
+] as const;
+
+// 常见币种
+export const CURRENCIES = ['RMB', 'USD', 'EUR', 'RUB', 'USDT', 'GBP', 'JPY', 'KRW', 'AUD', 'CAD'];

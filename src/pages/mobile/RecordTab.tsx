@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Form, Input, TextArea, Selector, DatePicker,
-  ImageUploader, Collapse, Tag, Toast, Popup,
+  ImageUploader, Collapse, Tag, Toast, Popup, Dialog,
 } from 'antd-mobile';
 import { AddOutline } from 'antd-mobile-icons';
 import { useAuth } from '../../hooks/useAuth';
@@ -32,7 +32,8 @@ const TRANSFER_DIRECTIONS = [
 export default function RecordTab() {
   const { user } = useAuth();
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [todayRecords, setTodayRecords] = useState<Transaction[]>([]);
+  const [dateRecords, setDateRecords] = useState<Transaction[]>([]);
+  const submittingRef = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [formType, setFormType] = useState<string>('expense');
   const [loading, setLoading] = useState(false);
@@ -62,19 +63,19 @@ export default function RecordTab() {
   // 加载数据
   const loadData = useCallback(async () => {
     if (!user) return;
-    const today = dayjs().format('YYYY-MM-DD');
+    const targetDate = dayjs(txDate).format('YYYY-MM-DD');
 
     const [accRes, txRes] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', user.id),
       supabase.from('transactions').select('*')
         .eq('user_id', user.id)
-        .eq('transaction_date', today)
+        .eq('transaction_date', targetDate)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false }),
     ]);
     if (accRes.data) setAccounts(accRes.data);
-    if (txRes.data) setTodayRecords(txRes.data);
-  }, [user]);
+    if (txRes.data) setDateRecords(txRes.data);
+  }, [user, txDate]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -94,76 +95,103 @@ export default function RecordTab() {
   // 提交记录
   const handleSubmit = async () => {
     if (!user) return;
+    if (submittingRef.current) return; // 防重复提交锁
+    submittingRef.current = true;
     setLoading(true);
 
-    let imageUrl = '';
-    if (imageFile) {
-      const url = await uploadReceipt(imageFile);
-      if (url) imageUrl = url;
-    }
+    try {
+      let imageUrl = '';
+      if (imageFile) {
+        const url = await uploadReceipt(imageFile);
+        if (url) imageUrl = url;
+      }
 
-    const base = {
-      user_id: user.id,
-      transaction_date: dayjs(txDate).format('YYYY-MM-DD'),
-      notes: notes || null,
-      image_url: imageUrl || null,
-    };
+      const base = {
+        user_id: user.id,
+        transaction_date: dayjs(txDate).format('YYYY-MM-DD'),
+        notes: notes || null,
+        image_url: imageUrl || null,
+      };
 
-    let data: any = {};
-    switch (formType) {
-      case 'expense':
-        if (!direction || !currency || !amount || !fromAccountId) {
-          Toast.show({ icon: 'fail', content: '请填写完整信息' });
-          setLoading(false);
-          return;
-        }
-        data = { ...base, type: 'expense', direction, currency, amount: parseFloat(amount), from_account_id: fromAccountId };
-        break;
-      case 'income':
-        if (!direction || !currency || !amount || !toAccountId) {
-          Toast.show({ icon: 'fail', content: '请填写完整信息' });
-          setLoading(false);
-          return;
-        }
-        data = { ...base, type: 'income', direction, currency, amount: parseFloat(amount), to_account_id: toAccountId };
-        break;
-      case 'exchange':
-        if (!fromCurrency || !toCurrency || !fromAmount || !toAmount || !exchangeRate || !fromAccountId || !toAccountId) {
-          Toast.show({ icon: 'fail', content: '请填写完整信息' });
-          setLoading(false);
-          return;
-        }
-        data = {
-          ...base, type: 'exchange',
-          from_currency: fromCurrency, to_currency: toCurrency,
-          from_amount: parseFloat(fromAmount), to_amount: parseFloat(toAmount),
-          exchange_rate: parseFloat(exchangeRate),
-          from_account_id: fromAccountId, to_account_id: toAccountId,
-        };
-        break;
-      case 'transfer':
-        if (!direction || !currency || !amount || !fromAccountId || !toAccountId) {
-          Toast.show({ icon: 'fail', content: '请填写完整信息' });
-          setLoading(false);
-          return;
-        }
-        data = {
-          ...base, type: 'transfer', direction, currency, amount: parseFloat(amount),
-          exchange_rate: exchangeRate ? parseFloat(exchangeRate) : null,
-          from_account_id: fromAccountId, to_account_id: toAccountId,
-        };
-        break;
-    }
+      let data: any = {};
+      switch (formType) {
+        case 'expense':
+          if (!direction || !currency || !amount || !fromAccountId) {
+            Toast.show({ icon: 'fail', content: '请填写完整信息' });
+            return;
+          }
+          data = { ...base, type: 'expense', direction, currency, amount: parseFloat(amount), from_account_id: fromAccountId };
+          break;
+        case 'income':
+          if (!direction || !currency || !amount || !toAccountId) {
+            Toast.show({ icon: 'fail', content: '请填写完整信息' });
+            return;
+          }
+          data = { ...base, type: 'income', direction, currency, amount: parseFloat(amount), to_account_id: toAccountId };
+          break;
+        case 'exchange':
+          if (!fromCurrency || !toCurrency || !fromAmount || !toAmount || !exchangeRate || !fromAccountId || !toAccountId) {
+            Toast.show({ icon: 'fail', content: '请填写完整信息' });
+            return;
+          }
+          data = {
+            ...base, type: 'exchange',
+            from_currency: fromCurrency, to_currency: toCurrency,
+            from_amount: parseFloat(fromAmount), to_amount: parseFloat(toAmount),
+            exchange_rate: parseFloat(exchangeRate),
+            from_account_id: fromAccountId, to_account_id: toAccountId,
+          };
+          break;
+        case 'transfer':
+          if (!direction || !currency || !amount || !fromAccountId || !toAccountId) {
+            Toast.show({ icon: 'fail', content: '请填写完整信息' });
+            return;
+          }
+          data = {
+            ...base, type: 'transfer', direction, currency, amount: parseFloat(amount),
+            exchange_rate: exchangeRate ? parseFloat(exchangeRate) : null,
+            from_account_id: fromAccountId, to_account_id: toAccountId,
+          };
+          break;
+      }
 
-    const { error } = await supabase.from('transactions').insert(data);
-    setLoading(false);
+      // 相似记录检测
+      let dupQuery = supabase.from('transactions').select('id')
+        .eq('user_id', user.id)
+        .eq('transaction_date', base.transaction_date)
+        .eq('type', formType)
+        .eq('is_deleted', false)
+        .limit(1);
+      if (formType === 'exchange') {
+        dupQuery = dupQuery.eq('from_amount', data.from_amount);
+      } else {
+        dupQuery = dupQuery.eq('amount', data.amount);
+      }
+      const { data: existing } = await dupQuery;
+      if (existing && existing.length > 0) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Dialog.confirm({
+            title: '疑似重复记录',
+            content: '检测到同日已有相同类型和金额的记录，确定要继续提交吗？',
+            onConfirm: () => { resolve(true); },
+            onCancel: () => { resolve(false); },
+          });
+        });
+        if (!confirmed) return;
+      }
 
-    if (error) {
-      Toast.show({ icon: 'fail', content: '提交失败: ' + error.message });
-    } else {
-      Toast.show({ icon: 'success', content: '记录成功' });
-      resetForm();
-      loadData();
+      const { error } = await supabase.from('transactions').insert(data);
+
+      if (error) {
+        Toast.show({ icon: 'fail', content: '提交失败: ' + error.message });
+      } else {
+        Toast.show({ icon: 'success', content: '记录成功' });
+        resetForm();
+        loadData();
+      }
+    } finally {
+      setLoading(false);
+      submittingRef.current = false;
     }
   };
 
@@ -176,7 +204,6 @@ export default function RecordTab() {
     setExchangeRate('');
     setFromAccountId(''); setToAccountId('');
     setNotes('');
-    setTxDate(new Date());
     setImageFile(null);
   };
 
@@ -219,18 +246,30 @@ export default function RecordTab() {
         </Button>
       </div>
 
-      {/* 今日已提交 */}
-      <div style={{
-        background: '#fff', borderRadius: 12, padding: 16, marginBottom: 12,
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-      }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>
-          📋 今天 ({dayjs().format('MM/DD')}) 已提交 {todayRecords.length} 条
-        </div>
-        {todayRecords.length === 0 ? (
-          <p style={{ color: '#999', fontSize: 13, margin: 0 }}>暂无记录</p>
-        ) : (
-          todayRecords.map(r => (
+      {/* 当日/补记 已提交 */}
+      {(() => {
+        const isBackdating = !dayjs(txDate).isSame(dayjs(), 'day');
+        const sectionTitle = isBackdating
+          ? `📋 补记 ${dayjs(txDate).format('MM/DD')} 已提交 ${dateRecords.length} 条`
+          : `📋 今天 (${dayjs().format('MM/DD')}) 已提交 ${dateRecords.length} 条`;
+        return (
+          <>
+            {isBackdating && (
+              <Tag color="warning" style={{ marginBottom: 8, display: 'inline-block' }}>
+                ⚠️ 当前为补记模式，记录日期为 {dayjs(txDate).format('MM-DD')}
+              </Tag>
+            )}
+            <div style={{
+              background: '#fff', borderRadius: 12, padding: 16, marginBottom: 12,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                {sectionTitle}
+              </div>
+              {dateRecords.length === 0 ? (
+                <p style={{ color: '#999', fontSize: 13, margin: 0 }}>暂无记录</p>
+              ) : (
+                dateRecords.map(r => (
             <div key={r.id} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 14,
@@ -248,6 +287,9 @@ export default function RecordTab() {
           ))
         )}
       </div>
+          </>
+        );
+      })()}
 
       {/* 新增记录表单 (Popup 弹出) */}
       <Popup
@@ -378,12 +420,41 @@ export default function RecordTab() {
 
           {/* 日期 */}
           <Form.Item label="日期">
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              {[
+                { label: '今天', date: new Date() },
+                { label: '昨天', date: dayjs().subtract(1, 'day').toDate() },
+                { label: '前天', date: dayjs().subtract(2, 'day').toDate() },
+              ].map(({ label, date }) => (
+                <Button
+                  key={label}
+                  size="mini"
+                  fill={dayjs(txDate).isSame(date, 'day') ? 'solid' : 'outline'}
+                  color={dayjs(txDate).isSame(date, 'day') ? 'primary' : 'default'}
+                  onClick={() => setTxDate(date)}
+                  style={{ fontSize: 12 }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
             <DatePicker
               value={txDate}
               onConfirm={(val) => val && setTxDate(val)}
             >
               {(value) => <div>{value ? dayjs(value).format('YYYY-MM-DD') : '选择日期'}</div>}
             </DatePicker>
+            {!dayjs(txDate).isSame(dayjs(), 'day') && (
+              <Button
+                size="mini"
+                color="primary"
+                fill="none"
+                onClick={() => setTxDate(new Date())}
+                style={{ fontSize: 12, marginTop: 6 }}
+              >
+                回到今天
+              </Button>
+            )}
           </Form.Item>
 
           {/* 备注 */}
@@ -482,21 +553,33 @@ export default function RecordTab() {
 // 历史记录列表子组件
 function HistoryList({ userId }: { userId: string }) {
   const [records, setRecords] = useState<Transaction[]>([]);
-  const dateRange: [Date, Date] = [
-    dayjs().subtract(30, 'day').toDate(),
-    new Date(),
-  ];
+  const [historyDays, setHistoryDays] = useState(30);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
+    setLoading(true);
+    const startDate = dayjs().subtract(historyDays, 'day').format('YYYY-MM-DD');
+    const endDate = dayjs().format('YYYY-MM-DD');
     supabase.from('transactions').select('*')
       .eq('user_id', userId).eq('is_deleted', false)
-      .gte('transaction_date', dayjs(dateRange[0]).format('YYYY-MM-DD'))
-      .lte('transaction_date', dayjs(dateRange[1]).format('YYYY-MM-DD'))
+      .gte('transaction_date', startDate)
+      .lte('transaction_date', endDate)
       .order('transaction_date', { ascending: false })
-      .limit(50)
-      .then(({ data }) => { if (data) setRecords(data); });
-  }, [userId, dateRange]);
+      .limit(100)
+      .then(({ data }) => {
+        if (data) {
+          setRecords(data);
+          setHasMore(data.length >= 100);
+        }
+        setLoading(false);
+      });
+  }, [userId, historyDays]);
+
+  const loadMore = () => {
+    setHistoryDays(prev => prev + 30);
+  };
 
   return (
     <div>
@@ -514,7 +597,17 @@ function HistoryList({ userId }: { userId: string }) {
           {r.image_url && <div style={{ color: '#1677ff' }}>📷 有凭证</div>}
         </div>
       ))}
-      {records.length === 0 && <p style={{ color: '#999', textAlign: 'center' }}>暂无记录</p>}
+      {records.length === 0 && !loading && <p style={{ color: '#999', textAlign: 'center' }}>暂无记录</p>}
+      {hasMore && (
+        <Button
+          block fill="none" size="small"
+          style={{ marginTop: 8 }}
+          loading={loading}
+          onClick={loadMore}
+        >
+          加载更早记录
+        </Button>
+      )}
     </div>
   );
 }

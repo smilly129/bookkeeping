@@ -11,6 +11,7 @@ interface TxRow extends Transaction {
   user_name?: string;
   from_account_name?: string;
   to_account_name?: string;
+  _isDuplicate?: boolean;
 }
 
 export default function AdminRecords() {
@@ -67,6 +68,19 @@ export default function AdminRecords() {
         from_account_name: (t as any).from_acc?.name,
         to_account_name: (t as any).to_acc?.name,
       }));
+
+      // 疑似重复检测：同用户 + 同日期 + 同类型 + 同金额
+      const groups = new Map<string, TxRow[]>();
+      rows.forEach(r => {
+        const key = `${r.user_id}|${r.transaction_date}|${r.type}|${r.amount || r.from_amount}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(r);
+      });
+      groups.forEach((group) => {
+        if (group.length > 1) {
+          group.forEach(r => { r._isDuplicate = true; });
+        }
+      });
 
       if (filterUser) {
         setData(rows.filter(r => r.user_id === filterUser));
@@ -149,7 +163,14 @@ export default function AdminRecords() {
   ];
 
   const columns = [
-    { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100, sorter: (a: TxRow, b: TxRow) => a.transaction_date.localeCompare(b.transaction_date) },
+    { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100, sorter: (a: TxRow, b: TxRow) => a.transaction_date.localeCompare(b.transaction_date),
+      render: (date: string, record: TxRow) => (
+        <span>
+          {date}
+          {record._isDuplicate && <Tag color="warning" style={{ marginLeft: 4, fontSize: 10 }}>疑似重复</Tag>}
+        </span>
+      ),
+    },
     {
       title: '姓名', dataIndex: 'user_name', key: 'user', width: 80,
       filters: users.map(u => ({ text: u.name, value: u.name })),
@@ -236,6 +257,9 @@ export default function AdminRecords() {
         scroll={{ x: 1400 }}
         pagination={{ pageSize: 50, showTotal: (total) => `共 ${total} 条` }}
         size="small"
+        onRow={(record) => ({
+          style: record._isDuplicate ? { backgroundColor: '#fffbe6' } : undefined,
+        })}
       />
 
       {/* 编辑弹窗 */}
@@ -269,6 +293,16 @@ export default function AdminRecords() {
                 <InputNumber value={editingRow.amount} onChange={(v) => setEditingRow({ ...editingRow, amount: v || 0 })} />
               </Form.Item>
             </Space>
+            <Form.Item label="交易日期">
+              <DatePicker
+                value={editingRow.transaction_date ? dayjs(editingRow.transaction_date) : undefined}
+                onChange={(date) => {
+                  if (date) {
+                    setEditingRow({ ...editingRow, transaction_date: dayjs(date).format('YYYY-MM-DD') });
+                  }
+                }}
+              />
+            </Form.Item>
             <Form.Item label="备注">
               <Input.TextArea value={editingRow.notes || ''} onChange={(e) => setEditingRow({ ...editingRow, notes: e.target.value })} rows={2} />
             </Form.Item>

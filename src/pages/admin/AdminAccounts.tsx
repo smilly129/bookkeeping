@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Table, Card, Statistic, Row, Col } from 'antd';
-import { supabase, type AccountBalance, ACCOUNT_TYPES } from '../../lib/supabase';
+import { Table, Card, Statistic, Row, Col, Button, Modal, Form, Input, Select, InputNumber, message, Popconfirm, Space } from 'antd';
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { supabase, type AccountBalance, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
 
 interface AccountRow extends AccountBalance {
   user_name?: string;
@@ -10,6 +11,34 @@ export default function AdminAccounts() {
   const [data, setData] = useState<AccountRow[]>([]);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // 新增账户
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [newAccount, setNewAccount] = useState({ user_id: '', account_type: '', name: '', currency: '', initial_balance: '0' });
+
+  const handleAddAccount = async () => {
+    const a = newAccount;
+    if (!a.user_id || !a.account_type || !a.name || !a.currency) { message.error('请填写完整'); return; }
+    setAddLoading(true);
+    const { error } = await supabase.from('accounts').insert({
+      user_id: a.user_id, account_type: a.account_type, name: a.name,
+      currency: a.currency, initial_balance: parseFloat(a.initial_balance) || 0,
+    });
+    setAddLoading(false);
+    if (error) { message.error('添加失败: ' + error.message); return; }
+    message.success('已添加');
+    setAddOpen(false);
+    setNewAccount({ user_id: '', account_type: '', name: '', currency: '', initial_balance: '0' });
+    loadBalances();
+  };
+
+  // 删除账户
+  const handleDeleteAccount = async (id: string) => {
+    await supabase.from('accounts').delete().eq('id', id);
+    message.success('已删除');
+    loadBalances();
+  };
 
   useEffect(() => {
     supabase.from('users').select('id, name').then(({ data: u }) => {
@@ -78,11 +107,22 @@ export default function AdminAccounts() {
     { title: '币种', dataIndex: 'currency', key: 'currency', width: 70 },
     { title: '期初余额', dataIndex: 'initial_balance', key: 'init', width: 120, render: (v: number) => v?.toLocaleString() },
     { title: '当前余额', dataIndex: 'current_balance', key: 'balance', width: 130, render: (v: number) => <span style={{ fontWeight: 700, fontSize: 15, color: v < 0 ? '#ff4d4f' : '#1677ff' }}>{v?.toLocaleString()}</span> },
+    {
+      title: '操作', key: 'actions', width: 100,
+      render: (_: any, r: AccountRow) => (
+        <Popconfirm title="确定删除此账户?" onConfirm={() => handleDeleteAccount(r.account_id)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
+    },
   ];
 
   return (
     <div>
-      <h2>🏦 账户余额总表</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>🏦 账户余额总表</h2>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>新增账户</Button>
+      </div>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {Object.entries(currencyTotals).map(([cur, total]) => (
           <Col xs={12} sm={6} key={cur}>
@@ -91,6 +131,29 @@ export default function AdminAccounts() {
         ))}
       </Row>
       <Table columns={columns} dataSource={data} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 800 }} />
+
+      <Modal title="新增账户" open={addOpen} onCancel={() => setAddOpen(false)} onOk={handleAddAccount} confirmLoading={addLoading}>
+        <Form layout="vertical">
+          <Form.Item label="用户" required>
+            <Select value={newAccount.user_id || undefined} onChange={(v) => setNewAccount({ ...newAccount, user_id: v })}
+              options={users.map(u => ({ label: u.name, value: u.id }))} placeholder="选择用户" />
+          </Form.Item>
+          <Form.Item label="账户类型" required>
+            <Select value={newAccount.account_type || undefined} onChange={(v) => setNewAccount({ ...newAccount, account_type: v })}
+              options={ACCOUNT_TYPES.map(t => ({ label: `${t.icon} ${t.label}`, value: t.value }))} />
+          </Form.Item>
+          <Form.Item label="账户名称" required>
+            <Input value={newAccount.name} onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })} placeholder="如: 招行储蓄卡" />
+          </Form.Item>
+          <Form.Item label="币种" required>
+            <Select value={newAccount.currency || undefined} onChange={(v) => setNewAccount({ ...newAccount, currency: v })}
+              options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))} />
+          </Form.Item>
+          <Form.Item label="期初余额">
+            <InputNumber value={parseFloat(newAccount.initial_balance) || 0} onChange={(v) => setNewAccount({ ...newAccount, initial_balance: String(v || 0) })} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

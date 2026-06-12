@@ -4,6 +4,20 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: '/bookkeeping/',
+  build: {
+    outDir: 'docs',
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules/antd/') || id.includes('@ant-design/icons')) return 'antd';
+          if (id.includes('node_modules/antd-mobile')) return 'antd-mobile';
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) return 'vendor';
+          if (id.includes('node_modules/@supabase')) return 'supabase';
+          if (id.includes('node_modules/dayjs')) return 'dayjs';
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

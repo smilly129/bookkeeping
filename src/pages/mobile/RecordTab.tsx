@@ -303,11 +303,10 @@ export default function RecordTab() {
               <span style={{ color: '#999', display: 'flex', alignItems: 'center', gap: 8 }}>
                 {r.image_url && '📷 '}
                 {r.notes?.slice(0, 10)}
-                <DeleteOutline
-                  fontSize={14}
-                  style={{ color: '#ff4d4f', cursor: 'pointer' }}
+                <span
+                  style={{ color: '#ff4d4f', cursor: 'pointer', marginLeft: 4, fontSize: 13 }}
                   onClick={(e) => { e.stopPropagation(); handleDeleteRecord(r.id); }}
-                />
+                >删除</span>
               </span>
             </div>
           ))
@@ -638,11 +637,10 @@ function HistoryList({ userId }: { userId: string }) {
             </span>
             <span style={{ color: '#999', display: 'flex', alignItems: 'center', gap: 8 }}>
               {r.transaction_date}
-              <DeleteOutline
-                fontSize={12}
-                style={{ color: '#ff4d4f', cursor: 'pointer' }}
+              <span
+                style={{ color: '#ff4d4f', cursor: 'pointer', marginLeft: 4, fontSize: 11 }}
                 onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }}
-              />
+              >删除</span>
             </span>
           </div>
           {r.notes && <div style={{ color: '#666', marginTop: 2 }}>{r.notes}</div>}

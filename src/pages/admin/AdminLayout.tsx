@@ -65,7 +65,10 @@ export default function AdminLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key, domEvent }) => {
+            domEvent.preventDefault();
+            navigate(key);
+          }}
           style={{ borderRight: 0 }}
         />
       </Sider>

@@ -3,7 +3,7 @@ import {
   Button, Form, Input, TextArea, Selector, DatePicker,
   ImageUploader, Collapse, Tag, Toast, Popup, Dialog,
 } from 'antd-mobile';
-import { AddOutline } from 'antd-mobile-icons';
+import { AddOutline, DeleteOutline } from 'antd-mobile-icons';
 import { useAuth } from '../../hooks/useAuth';
 import {
   supabase, type Account, type Transaction,
@@ -78,6 +78,27 @@ export default function RecordTab() {
   }, [user, txDate]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // 删除记录（软删除）
+  const handleDeleteRecord = async (id: string) => {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Dialog.confirm({
+        title: '确认删除',
+        content: '确定要删除这条记录吗？',
+        onConfirm: () => { resolve(true); },
+        onCancel: () => { resolve(false); },
+      });
+    });
+    if (!confirmed) return;
+    const { error } = await supabase.from('transactions').update({ is_deleted: true })
+      .eq('id', id);
+    if (error) {
+      Toast.show({ icon: 'fail', content: '删除失败' });
+    } else {
+      Toast.show({ icon: 'success', content: '已删除' });
+      loadData();
+    }
+  };
 
   // 上传凭证图片
   const uploadReceipt = async (file: File): Promise<string | null> => {
@@ -279,9 +300,14 @@ export default function RecordTab() {
                 {' '}{r.currency || r.from_currency}{' '}
                 {r.amount || r.from_amount}
               </span>
-              <span style={{ color: '#999' }}>
+              <span style={{ color: '#999', display: 'flex', alignItems: 'center', gap: 8 }}>
                 {r.image_url && '📷 '}
                 {r.notes?.slice(0, 10)}
+                <DeleteOutline
+                  fontSize={14}
+                  style={{ color: '#ff4d4f', cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); handleDeleteRecord(r.id); }}
+                />
               </span>
             </div>
           ))
@@ -581,6 +607,25 @@ function HistoryList({ userId }: { userId: string }) {
     setHistoryDays(prev => prev + 30);
   };
 
+  const handleDelete = async (id: string) => {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Dialog.confirm({
+        title: '确认删除',
+        content: '确定要删除这条记录吗？',
+        onConfirm: () => { resolve(true); },
+        onCancel: () => { resolve(false); },
+      });
+    });
+    if (!confirmed) return;
+    const { error } = await supabase.from('transactions').update({ is_deleted: true }).eq('id', id);
+    if (error) {
+      Toast.show({ icon: 'fail', content: '删除失败' });
+    } else {
+      Toast.show({ icon: 'success', content: '已删除' });
+      setRecords(prev => prev.filter(r => r.id !== id));
+    }
+  };
+
   return (
     <div>
       {records.map(r => (
@@ -591,7 +636,14 @@ function HistoryList({ userId }: { userId: string }) {
               {' '}{r.type === 'exchange' ? `${r.from_currency}→${r.to_currency}` : r.currency}
               {' '}{r.amount || `${r.from_amount}→${r.to_amount}`}
             </span>
-            <span style={{ color: '#999' }}>{r.transaction_date}</span>
+            <span style={{ color: '#999', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {r.transaction_date}
+              <DeleteOutline
+                fontSize={12}
+                style={{ color: '#ff4d4f', cursor: 'pointer' }}
+                onClick={(e) => { e.stopPropagation(); handleDelete(r.id); }}
+              />
+            </span>
           </div>
           {r.notes && <div style={{ color: '#666', marginTop: 2 }}>{r.notes}</div>}
           {r.image_url && <div style={{ color: '#1677ff' }}>📷 有凭证</div>}

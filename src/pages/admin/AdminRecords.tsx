@@ -3,8 +3,8 @@ import {
   Table, Button, Input, Select, DatePicker, Space, Tag, Modal,
   Form, InputNumber, message, Popconfirm, Image,
 } from 'antd';
-import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import { supabase, type Transaction, CURRENCIES } from '../../lib/supabase';
+import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { supabase, type Transaction, type Account, CURRENCIES, ACCOUNT_TYPES } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
 interface TxRow extends Transaction {
@@ -19,6 +19,75 @@ export default function AdminRecords() {
   const [loading, setLoading] = useState(false);
   const [editingRow, setEditingRow] = useState<TxRow | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
+
+  // 新增记录
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [newRecord, setNewRecord] = useState({
+    user_id: '', type: 'expense' as string, direction: '',
+    currency: '', amount: '',
+    from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '',
+    from_account_id: '', to_account_id: '',
+    transaction_date: dayjs(),
+    notes: '',
+  });
+  const [addAccounts, setAddAccounts] = useState<Account[]>([]);
+
+  // 加载新增用户的账户
+  const loadAccounts = async (userId: string) => {
+    if (!userId) { setAddAccounts([]); return; }
+    const { data } = await supabase.from('accounts').select('*').eq('user_id', userId);
+    if (data) setAddAccounts(data);
+  };
+
+  // 提交新增
+  const handleAddRecord = async () => {
+    const r = newRecord;
+    if (!r.user_id || !r.type) { message.error('请选择用户和类型'); return; }
+    setAddLoading(true);
+
+    const base = {
+      user_id: r.user_id,
+      transaction_date: dayjs(r.transaction_date).format('YYYY-MM-DD'),
+      notes: r.notes || null,
+    };
+
+    let data: any = {};
+    switch (r.type) {
+      case 'expense':
+        if (!r.direction || !r.currency || !r.amount || !r.from_account_id) {
+          message.error('请填写完整'); setAddLoading(false); return;
+        }
+        data = { ...base, type: 'expense', direction: r.direction, currency: r.currency, amount: parseFloat(r.amount), from_account_id: r.from_account_id };
+        break;
+      case 'income':
+        if (!r.direction || !r.currency || !r.amount || !r.to_account_id) {
+          message.error('请填写完整'); setAddLoading(false); return;
+        }
+        data = { ...base, type: 'income', direction: r.direction, currency: r.currency, amount: parseFloat(r.amount), to_account_id: r.to_account_id };
+        break;
+      case 'exchange':
+        if (!r.from_currency || !r.to_currency || !r.from_amount || !r.to_amount || !r.exchange_rate || !r.from_account_id || !r.to_account_id) {
+          message.error('请填写完整'); setAddLoading(false); return;
+        }
+        data = { ...base, type: 'exchange', from_currency: r.from_currency, to_currency: r.to_currency, from_amount: parseFloat(r.from_amount), to_amount: parseFloat(r.to_amount), exchange_rate: parseFloat(r.exchange_rate), from_account_id: r.from_account_id, to_account_id: r.to_account_id };
+        break;
+      case 'transfer':
+        if (!r.direction || !r.currency || !r.amount || !r.from_account_id || !r.to_account_id) {
+          message.error('请填写完整'); setAddLoading(false); return;
+        }
+        data = { ...base, type: 'transfer', direction: r.direction, currency: r.currency, amount: parseFloat(r.amount), exchange_rate: r.exchange_rate ? parseFloat(r.exchange_rate) : null, from_account_id: r.from_account_id, to_account_id: r.to_account_id };
+        break;
+    }
+
+    const { error } = await supabase.from('transactions').insert(data);
+    setAddLoading(false);
+    if (error) { message.error('添加失败: ' + error.message); return; }
+    message.success('已添加');
+    setAddModalOpen(false);
+    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '' });
+    loadData();
+  };
 
   // 筛选
   const [filterUser, setFilterUser] = useState('');
@@ -219,7 +288,13 @@ export default function AdminRecords() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0 }}>📋 数据表格</h2>
-        <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
+        <Space>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+            setAddModalOpen(true);
+            setAddAccounts([]);
+          }}>新增记录</Button>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
+        </Space>
       </div>
 
       {/* 筛选栏 */}
@@ -308,6 +383,116 @@ export default function AdminRecords() {
             </Form.Item>
           </Form>
         )}
+      </Modal>
+
+      {/* 新增记录弹窗 */}
+      <Modal
+        title="新增记录"
+        open={addModalOpen}
+        onCancel={() => setAddModalOpen(false)}
+        onOk={handleAddRecord}
+        confirmLoading={addLoading}
+        width={600}
+      >
+        <Form layout="vertical">
+          <Form.Item label="记账人" required>
+            <Select
+              value={newRecord.user_id || undefined}
+              onChange={(v) => {
+                setNewRecord({ ...newRecord, user_id: v, from_account_id: '', to_account_id: '' });
+                loadAccounts(v);
+              }}
+              options={users.map(u => ({ label: u.name, value: u.id }))}
+              placeholder="选择记账人"
+            />
+          </Form.Item>
+          <Form.Item label="类型" required>
+            <Select value={newRecord.type} onChange={(v) => setNewRecord({ ...newRecord, type: v })}
+              options={typeOptions} />
+          </Form.Item>
+
+          {/* 方向 (expense/income/transfer) */}
+          {['expense', 'income', 'transfer'].includes(newRecord.type) && (
+            <Form.Item label="方向">
+              <Select value={newRecord.direction || undefined} onChange={(v) => setNewRecord({ ...newRecord, direction: v || '' })}
+                options={
+                  newRecord.type === 'transfer'
+                    ? [{ label: '出境(国内→国外)', value: 'outbound' }, { label: '入境(国外→国内)', value: 'inbound' }]
+                    : [{ label: '国内', value: 'domestic' }, { label: '国外', value: 'international' }]
+                }
+                allowClear
+              />
+            </Form.Item>
+          )}
+
+          {/* 币种 + 金额 (expense/income/transfer) */}
+          {['expense', 'income', 'transfer'].includes(newRecord.type) && (
+            <Space>
+              <Form.Item label="币种">
+                <Select value={newRecord.currency || undefined} onChange={(v) => setNewRecord({ ...newRecord, currency: v || '' })}
+                  options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))} allowClear style={{ width: 120 }} />
+              </Form.Item>
+              <Form.Item label="金额">
+                <Input type="number" value={newRecord.amount} onChange={(e) => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="输入金额" />
+              </Form.Item>
+            </Space>
+          )}
+
+          {/* exchange 双币种 */}
+          {newRecord.type === 'exchange' && (
+            <>
+              <Space>
+                <Form.Item label="从币种">
+                  <Select value={newRecord.from_currency || undefined} onChange={(v) => setNewRecord({ ...newRecord, from_currency: v || '' })}
+                    options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))} allowClear style={{ width: 120 }} />
+                </Form.Item>
+                <Form.Item label="换成">
+                  <Select value={newRecord.to_currency || undefined} onChange={(v) => setNewRecord({ ...newRecord, to_currency: v || '' })}
+                    options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))} allowClear style={{ width: 120 }} />
+                </Form.Item>
+              </Space>
+              <Space>
+                <Form.Item label="付出金额">
+                  <Input type="number" value={newRecord.from_amount} onChange={(e) => setNewRecord({ ...newRecord, from_amount: e.target.value })} />
+                </Form.Item>
+                <Form.Item label="得到金额">
+                  <Input type="number" value={newRecord.to_amount} onChange={(e) => setNewRecord({ ...newRecord, to_amount: e.target.value })} />
+                </Form.Item>
+              </Space>
+              <Form.Item label="汇率">
+                <Input type="number" value={newRecord.exchange_rate} onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })} />
+              </Form.Item>
+            </>
+          )}
+
+          {/* 账户选择 */}
+          {newRecord.user_id && (
+            <>
+              {['expense', 'exchange', 'transfer'].includes(newRecord.type) && (
+                <Form.Item label="从账户出">
+                  <Select value={newRecord.from_account_id || undefined} onChange={(v) => setNewRecord({ ...newRecord, from_account_id: v || '' })}
+                    options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} allowClear />
+                </Form.Item>
+              )}
+              {['income', 'exchange', 'transfer'].includes(newRecord.type) && (
+                <Form.Item label="入账账户">
+                  <Select value={newRecord.to_account_id || undefined} onChange={(v) => setNewRecord({ ...newRecord, to_account_id: v || '' })}
+                    options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} allowClear />
+                </Form.Item>
+              )}
+            </>
+          )}
+
+          <Form.Item label="交易日期">
+            <DatePicker
+              value={newRecord.transaction_date}
+              onChange={(date) => { if (date) setNewRecord({ ...newRecord, transaction_date: date }); }}
+            />
+          </Form.Item>
+          <Form.Item label="备注">
+            <Input.TextArea value={newRecord.notes} onChange={(e) => setNewRecord({ ...newRecord, notes: e.target.value })} rows={2} />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

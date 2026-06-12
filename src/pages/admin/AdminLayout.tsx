@@ -17,12 +17,12 @@ import AdminUsers from './AdminUsers';
 const { Header, Sider, Content } = Layout;
 
 const menuItems = [
-  { key: '/admin', icon: <DashboardOutlined />, label: '总览' },
-  { key: '/admin/records', icon: <TableOutlined />, label: '数据表格' },
-  { key: '/admin/reconcile', icon: <CheckCircleOutlined />, label: '对账管理' },
-  { key: '/admin/accounts', icon: <WalletOutlined />, label: '账户总表' },
-  { key: '/admin/reports', icon: <BarChartOutlined />, label: '汇总报表' },
-  { key: '/admin/users', icon: <UserOutlined />, label: '用户管理' },
+  { key: '/', icon: <DashboardOutlined />, label: '总览' },
+  { key: '/records', icon: <TableOutlined />, label: '数据表格' },
+  { key: '/reconcile', icon: <CheckCircleOutlined />, label: '对账管理' },
+  { key: '/accounts', icon: <WalletOutlined />, label: '账户总表' },
+  { key: '/reports', icon: <BarChartOutlined />, label: '汇总报表' },
+  { key: '/users', icon: <UserOutlined />, label: '用户管理' },
 ];
 
 export default function AdminLayout() {

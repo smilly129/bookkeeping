@@ -42,7 +42,7 @@ CREATE TABLE transactions (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   type              TEXT NOT NULL CHECK (type IN ('expense', 'income', 'exchange', 'transfer')),
-  direction         TEXT CHECK (direction IN ('domestic', 'international', 'outbound', 'inbound')),
+  direction         TEXT CHECK (direction IN ('domestic', 'international', 'outbound', 'inbound', 'domestic_domestic', 'international_international', 'domestic_international', 'international_domestic')),
 
   -- 金额
   currency          TEXT,

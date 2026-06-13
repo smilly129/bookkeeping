@@ -7,7 +7,7 @@ import { AddOutline, DeleteOutline } from 'antd-mobile-icons';
 import { useAuth } from '../../hooks/useAuth';
 import {
   supabase, type Account, type Transaction,
-  ACCOUNT_TYPES, CURRENCIES,
+  ACCOUNT_TYPES, CURRENCIES, TRANSFER_DIRECTIONS,
 } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
@@ -22,11 +22,6 @@ const RECORD_TYPES = [
 const DIRECTIONS = [
   { label: '国内', value: 'domestic' },
   { label: '国外', value: 'international' },
-];
-
-const TRANSFER_DIRECTIONS = [
-  { label: '国内→国外', value: 'outbound' },
-  { label: '国外→国内', value: 'inbound' },
 ];
 
 export default function RecordTab() {
@@ -163,17 +158,40 @@ export default function RecordTab() {
             from_account_id: fromAccountId, to_account_id: toAccountId,
           };
           break;
-        case 'transfer':
-          if (!direction || !currency || !amount || !fromAccountId || !toAccountId) {
+        case 'transfer': {
+          const fromAcc = myAccounts.find(a => a.id === fromAccountId);
+          const toAcc = myAccounts.find(a => a.id === toAccountId);
+          const isCross = fromAcc && toAcc && fromAcc.currency !== toAcc.currency;
+          if (!direction || !fromAccountId || !toAccountId) {
             Toast.show({ icon: 'fail', content: '请填写完整信息' });
             return;
           }
-          data = {
-            ...base, type: 'transfer', direction, currency, amount: parseFloat(amount),
-            exchange_rate: exchangeRate ? parseFloat(exchangeRate) : null,
-            from_account_id: fromAccountId, to_account_id: toAccountId,
-          };
+          if (isCross) {
+            if (!fromAmount || !toAmount || !exchangeRate) {
+              Toast.show({ icon: 'fail', content: '请填写完整信息' });
+              return;
+            }
+            data = {
+              ...base, type: 'transfer', direction,
+              from_currency: fromAcc.currency, to_currency: toAcc.currency,
+              from_amount: parseFloat(fromAmount), to_amount: parseFloat(toAmount),
+              exchange_rate: parseFloat(exchangeRate),
+              from_account_id: fromAccountId, to_account_id: toAccountId,
+            };
+          } else {
+            if (!amount) {
+              Toast.show({ icon: 'fail', content: '请填写金额' });
+              return;
+            }
+            data = {
+              ...base, type: 'transfer', direction,
+              currency: fromAcc?.currency || '',
+              amount: parseFloat(amount),
+              from_account_id: fromAccountId, to_account_id: toAccountId,
+            };
+          }
           break;
+        }
       }
 
       // 相似记录检测
@@ -184,6 +202,8 @@ export default function RecordTab() {
         .eq('is_deleted', false)
         .limit(1);
       if (formType === 'exchange') {
+        dupQuery = dupQuery.eq('from_amount', data.from_amount);
+      } else if (formType === 'transfer' && data.from_amount) {
         dupQuery = dupQuery.eq('from_amount', data.from_amount);
       } else {
         dupQuery = dupQuery.eq('amount', data.amount);
@@ -356,8 +376,8 @@ export default function RecordTab() {
             </Form.Item>
           )}
 
-          {/* 单一币种+金额 (付款/收款/转款) */}
-          {['expense', 'income', 'transfer'].includes(formType) && (
+          {/* 单一币种+金额 (付款/收款) */}
+          {['expense', 'income'].includes(formType) && (
             <>
               <Form.Item label="币种">
                 <Selector
@@ -413,15 +433,92 @@ export default function RecordTab() {
             </>
           )}
 
-          {/* 转款汇率 */}
-          {formType === 'transfer' && (
-            <Form.Item label="汇率（选填）">
-              <Input placeholder="涉及换汇时填写" type="number" value={exchangeRate} onChange={setExchangeRate} />
-            </Form.Item>
-          )}
+          {/* 转款：出账/入账账户 + 金额 */}
+          {formType === 'transfer' && (() => {
+            const fromAcc = myAccounts.find(a => a.id === fromAccountId);
+            const toAcc = myAccounts.find(a => a.id === toAccountId);
+            const fromCur = fromAcc?.currency || '';
+            const toCur = toAcc?.currency || '';
+            const isCross = fromCur && toCur && fromCur !== toCur;
+
+            return (
+              <>
+                <Form.Item label="从账户出">
+                  <Selector
+                    options={myAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
+                    value={fromAccountId ? [fromAccountId] : []}
+                    onChange={(arr) => {
+                      const id = arr[0] || '';
+                      setFromAccountId(id);
+                      const acc = myAccounts.find(a => a.id === id);
+                      if (acc) {
+                        setFromCurrency(acc.currency);
+                        if (!toAccountId) setCurrency(acc.currency);
+                      }
+                    }}
+                  />
+                  {myAccounts.length === 0 && <span style={{ color: '#ff4d4f', fontSize: 12 }}>请先在"我的账户"中添加账户</span>}
+                </Form.Item>
+                <Form.Item label="入账账户">
+                  <Selector
+                    options={myAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
+                    value={toAccountId ? [toAccountId] : []}
+                    onChange={(arr) => {
+                      const id = arr[0] || '';
+                      setToAccountId(id);
+                      const acc = myAccounts.find(a => a.id === id);
+                      if (acc) setToCurrency(acc.currency);
+                    }}
+                  />
+                </Form.Item>
+                {fromCur && toCur && (
+                  <div style={{ fontSize: 12, color: isCross ? '#fa8c16' : '#52c41a', marginBottom: 12 }}>
+                    {isCross ? `⚠️ 跨币种: ${fromCur} → ${toCur}` : `✅ 同币种: ${fromCur}`}
+                  </div>
+                )}
+                {isCross ? (
+                  <>
+                    <Form.Item label={`付出金额 (${fromCur})`}>
+                      <Input placeholder="比如 10000" type="number" value={fromAmount} onChange={(v) => {
+                        setFromAmount(v);
+                        const fa = parseFloat(v);
+                        const er = parseFloat(exchangeRate);
+                        if (fa && er) setToAmount((fa * er).toFixed(2));
+                      }} />
+                    </Form.Item>
+                    <Form.Item label={`汇率 (${fromCur}→${toCur})`}>
+                      <Input placeholder="比如 7.25" type="number" value={exchangeRate} onChange={(v) => {
+                        setExchangeRate(v);
+                        const fa = parseFloat(fromAmount);
+                        const er = parseFloat(v);
+                        if (fa && er) setToAmount((fa * er).toFixed(2));
+                      }} />
+                    </Form.Item>
+                    <Form.Item label={`到账金额 (${toCur})`}>
+                      <Input placeholder="自动计算" type="number" value={toAmount} onChange={(v) => {
+                        setToAmount(v);
+                        const fa = parseFloat(fromAmount);
+                        const ta = parseFloat(v);
+                        if (fa && ta && fa !== 0) setExchangeRate((ta / fa).toFixed(6));
+                      }} />
+                    </Form.Item>
+                  </>
+                ) : (
+                  <Form.Item label="金额">
+                    <Input
+                      placeholder="输入金额" type="number"
+                      value={amount}
+                      onChange={setAmount}
+                      style={{ fontSize: 20, fontWeight: 600 }}
+                    />
+                  </Form.Item>
+                )}
+              </>
+            );
+          })()}
 
           {/* 出账账户 */}
-          {['expense', 'exchange', 'transfer'].includes(formType) && (
+          {['expense', 'exchange'].includes(formType) && (
             <Form.Item label="从账户出">
               <Selector
                 options={myAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
@@ -433,7 +530,7 @@ export default function RecordTab() {
           )}
 
           {/* 入账账户 */}
-          {['income', 'exchange', 'transfer'].includes(formType) && (
+          {['income', 'exchange'].includes(formType) && (
             <Form.Item label="入账账户">
               <Selector
                 options={myAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}

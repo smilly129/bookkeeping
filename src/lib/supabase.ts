@@ -39,7 +39,7 @@ export interface Transaction {
   id: string;
   user_id: string;
   type: 'expense' | 'income' | 'exchange' | 'transfer';
-  direction?: 'domestic' | 'international' | 'outbound' | 'inbound';
+  direction?: 'domestic' | 'international' | 'outbound' | 'inbound' | 'domestic_domestic' | 'international_international' | 'domestic_international' | 'international_domestic';
   currency?: string;
   amount?: number;
   from_currency?: string;
@@ -104,3 +104,11 @@ export const ACCOUNT_TYPES = [
 
 // 常见币种
 export const CURRENCIES = ['RMB', 'USD', 'EUR', 'RUB', 'USDT', 'GBP', 'JPY', 'KRW', 'AUD', 'CAD'];
+
+// 转款方向
+export const TRANSFER_DIRECTIONS = [
+  { value: 'domestic_domestic', label: '国内转国内' },
+  { value: 'international_international', label: '国外转国外' },
+  { value: 'domestic_international', label: '国内转国外' },
+  { value: 'international_domestic', label: '国外转国内' },
+] as const;

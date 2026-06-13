@@ -4,7 +4,7 @@ import {
   Form, InputNumber, message, Popconfirm, Image,
 } from 'antd';
 import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { supabase, type Transaction, type Account, CURRENCIES, ACCOUNT_TYPES } from '../../lib/supabase';
+import { supabase, type Transaction, type Account, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
 interface TxRow extends Transaction {
@@ -72,12 +72,26 @@ export default function AdminRecords() {
         }
         data = { ...base, type: 'exchange', from_currency: r.from_currency, to_currency: r.to_currency, from_amount: parseFloat(r.from_amount), to_amount: parseFloat(r.to_amount), exchange_rate: parseFloat(r.exchange_rate), from_account_id: r.from_account_id, to_account_id: r.to_account_id };
         break;
-      case 'transfer':
-        if (!r.direction || !r.currency || !r.amount || !r.from_account_id || !r.to_account_id) {
+      case 'transfer': {
+        const fromAcc = addAccounts.find(a => a.id === r.from_account_id);
+        const toAcc = addAccounts.find(a => a.id === r.to_account_id);
+        const isCross = fromAcc && toAcc && fromAcc.currency !== toAcc.currency;
+        if (!r.direction || !r.from_account_id || !r.to_account_id) {
           message.error('请填写完整'); setAddLoading(false); return;
         }
-        data = { ...base, type: 'transfer', direction: r.direction, currency: r.currency, amount: parseFloat(r.amount), exchange_rate: r.exchange_rate ? parseFloat(r.exchange_rate) : null, from_account_id: r.from_account_id, to_account_id: r.to_account_id };
+        if (isCross) {
+          if (!r.from_amount || !r.to_amount || !r.exchange_rate) {
+            message.error('请填写完整'); setAddLoading(false); return;
+          }
+          data = { ...base, type: 'transfer', direction: r.direction, from_currency: fromAcc.currency, to_currency: toAcc.currency, from_amount: parseFloat(r.from_amount), to_amount: parseFloat(r.to_amount), exchange_rate: parseFloat(r.exchange_rate), from_account_id: r.from_account_id, to_account_id: r.to_account_id };
+        } else {
+          if (!r.amount) {
+            message.error('请填写金额'); setAddLoading(false); return;
+          }
+          data = { ...base, type: 'transfer', direction: r.direction, currency: fromAcc?.currency || '', amount: parseFloat(r.amount), from_account_id: r.from_account_id, to_account_id: r.to_account_id };
+        }
         break;
+      }
     }
 
     const { error } = await supabase.from('transactions').insert(data);
@@ -352,10 +366,11 @@ export default function AdminRecords() {
             </Form.Item>
             <Form.Item label="方向">
               <Select value={editingRow.direction} onChange={(v) => setEditingRow({ ...editingRow, direction: v })}
-                options={[
-                  { label: '国内', value: 'domestic' }, { label: '国外', value: 'international' },
-                  { label: '出境(国内→国外)', value: 'outbound' }, { label: '入境(国外→国内)', value: 'inbound' },
-                ]}
+                options={
+                  editingRow.type === 'transfer'
+                    ? TRANSFER_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))
+                    : [{ label: '国内', value: 'domestic' }, { label: '国外', value: 'international' }]
+                }
                 allowClear
               />
             </Form.Item>
@@ -412,21 +427,23 @@ export default function AdminRecords() {
           </Form.Item>
 
           {/* 方向 (expense/income/transfer) */}
-          {['expense', 'income', 'transfer'].includes(newRecord.type) && (
+          {['expense', 'income'].includes(newRecord.type) && (
             <Form.Item label="方向">
               <Select value={newRecord.direction || undefined} onChange={(v) => setNewRecord({ ...newRecord, direction: v || '' })}
-                options={
-                  newRecord.type === 'transfer'
-                    ? [{ label: '出境(国内→国外)', value: 'outbound' }, { label: '入境(国外→国内)', value: 'inbound' }]
-                    : [{ label: '国内', value: 'domestic' }, { label: '国外', value: 'international' }]
-                }
+                options={[{ label: '国内', value: 'domestic' }, { label: '国外', value: 'international' }]}
                 allowClear
               />
             </Form.Item>
           )}
+          {newRecord.type === 'transfer' && (
+            <Form.Item label="方向" required>
+              <Select value={newRecord.direction || undefined} onChange={(v) => setNewRecord({ ...newRecord, direction: v || '' })}
+                options={TRANSFER_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))} />
+            </Form.Item>
+          )}
 
-          {/* 币种 + 金额 (expense/income/transfer) */}
-          {['expense', 'income', 'transfer'].includes(newRecord.type) && (
+          {/* 币种 + 金额 (expense/income) */}
+          {['expense', 'income'].includes(newRecord.type) && (
             <Space>
               <Form.Item label="币种">
                 <Select value={newRecord.currency || undefined} onChange={(v) => setNewRecord({ ...newRecord, currency: v || '' })}
@@ -465,16 +482,16 @@ export default function AdminRecords() {
             </>
           )}
 
-          {/* 账户选择 */}
-          {newRecord.user_id && (
+          {/* 账户选择 (非转款) */}
+          {newRecord.user_id && newRecord.type !== 'transfer' && (
             <>
-              {['expense', 'exchange', 'transfer'].includes(newRecord.type) && (
+              {['expense', 'exchange'].includes(newRecord.type) && (
                 <Form.Item label="从账户出">
                   <Select value={newRecord.from_account_id || undefined} onChange={(v) => setNewRecord({ ...newRecord, from_account_id: v || '' })}
                     options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} allowClear />
                 </Form.Item>
               )}
-              {['income', 'exchange', 'transfer'].includes(newRecord.type) && (
+              {['income', 'exchange'].includes(newRecord.type) && (
                 <Form.Item label="入账账户">
                   <Select value={newRecord.to_account_id || undefined} onChange={(v) => setNewRecord({ ...newRecord, to_account_id: v || '' })}
                     options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} allowClear />
@@ -482,6 +499,71 @@ export default function AdminRecords() {
               )}
             </>
           )}
+
+          {/* 转款：账户 + 金额 */}
+          {newRecord.user_id && newRecord.type === 'transfer' && (() => {
+            const fromAcc = addAccounts.find(a => a.id === newRecord.from_account_id);
+            const toAcc = addAccounts.find(a => a.id === newRecord.to_account_id);
+            const isCross = fromAcc && toAcc && fromAcc.currency !== toAcc.currency;
+            return (
+              <>
+                <Form.Item label="从账户出" required>
+                  <Select value={newRecord.from_account_id || undefined}
+                    onChange={(v) => {
+                      const id = v || '';
+                      const acc = addAccounts.find(a => a.id === id);
+                      setNewRecord({ ...newRecord, from_account_id: id, from_currency: acc?.currency || '', to_currency: toAcc?.currency || '' });
+                    }}
+                    options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} />
+                </Form.Item>
+                <Form.Item label="入账账户" required>
+                  <Select value={newRecord.to_account_id || undefined}
+                    onChange={(v) => {
+                      const id = v || '';
+                      const acc = addAccounts.find(a => a.id === id);
+                      setNewRecord({ ...newRecord, to_account_id: id, from_currency: fromAcc?.currency || '', to_currency: acc?.currency || '' });
+                    }}
+                    options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))} />
+                </Form.Item>
+                {fromAcc && toAcc && (
+                  <div style={{ fontSize: 12, color: isCross ? '#fa8c16' : '#52c41a', marginBottom: 12 }}>
+                    {isCross ? `⚠️ 跨币种: ${fromAcc.currency} → ${toAcc.currency}` : `✅ 同币种: ${fromAcc.currency}`}
+                  </div>
+                )}
+                {isCross ? (
+                  <>
+                    <Space>
+                      <Form.Item label={`付出金额 (${fromAcc.currency})`}>
+                        <Input type="number" value={newRecord.from_amount} onChange={(e) => {
+                          const fa = parseFloat(e.target.value) || 0;
+                          const er = parseFloat(newRecord.exchange_rate) || 0;
+                          setNewRecord({ ...newRecord, from_amount: e.target.value, to_amount: er ? String((fa * er).toFixed(2)) : newRecord.to_amount });
+                        }} />
+                      </Form.Item>
+                      <Form.Item label={`汇率 (${fromAcc.currency}→${toAcc.currency})`}>
+                        <Input type="number" value={newRecord.exchange_rate} onChange={(e) => {
+                          const er = parseFloat(e.target.value) || 0;
+                          const fa = parseFloat(newRecord.from_amount) || 0;
+                          setNewRecord({ ...newRecord, exchange_rate: e.target.value, to_amount: fa && er ? String((fa * er).toFixed(2)) : newRecord.to_amount });
+                        }} />
+                      </Form.Item>
+                    </Space>
+                    <Form.Item label={`到账金额 (${toAcc.currency})`}>
+                      <Input type="number" value={newRecord.to_amount} onChange={(e) => {
+                        const ta = parseFloat(e.target.value) || 0;
+                        const fa = parseFloat(newRecord.from_amount) || 1;
+                        setNewRecord({ ...newRecord, to_amount: e.target.value, exchange_rate: String((ta / fa).toFixed(6)) });
+                      }} />
+                    </Form.Item>
+                  </>
+                ) : (
+                  <Form.Item label="金额">
+                    <Input type="number" value={newRecord.amount} onChange={(e) => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="输入金额" />
+                  </Form.Item>
+                )}
+              </>
+            );
+          })()}
 
           <Form.Item label="交易日期">
             <DatePicker

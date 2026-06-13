@@ -124,12 +124,12 @@ export default function AdminAccounts() {
         return `${info?.icon || ''} ${info?.label || t}`;
       },
     },
-    { title: '名称', dataIndex: 'name', key: 'name', width: 150 },
-    { title: '币种', dataIndex: 'currency', key: 'currency', width: 70 },
+    { title: '名称', dataIndex: 'name', key: 'name', width: 110, ellipsis: true },
+    { title: '币种', dataIndex: 'currency', key: 'currency', width: 60 },
     { title: '期初余额', dataIndex: 'initial_balance', key: 'init', width: 120, render: (v: number) => v?.toLocaleString() },
     { title: '当前余额', dataIndex: 'current_balance', key: 'balance', width: 130, render: (v: number) => <span style={{ fontWeight: 700, fontSize: 15, color: v < 0 ? '#ff4d4f' : '#1677ff' }}>{v?.toLocaleString()}</span> },
     {
-      title: '操作', key: 'actions', width: 100,
+      title: '操作', key: 'actions', width: 140, fixed: 'right' as const,
       render: (_: any, r: AccountRow) => (
         <Space>
           <Button size="small" icon={<EditOutlined />} onClick={() => {
@@ -162,7 +162,7 @@ export default function AdminAccounts() {
           </Col>
         ))}
       </Row>
-      <Table columns={columns} dataSource={data} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 800 }} />
+      <Table columns={columns} dataSource={data} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 900 }} />
 
       <Modal title="新增账户" open={addOpen} onCancel={() => setAddOpen(false)} onOk={handleAddAccount} confirmLoading={addLoading}>
         <Form layout="vertical">

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import {
   Table, Card, Tag, Button, Space, Select, Modal,
-  message,
+  message, Form, Input, InputNumber, Popconfirm,
 } from 'antd';
-import { CheckCircleOutlined, WarningOutlined, EyeOutlined, CheckOutlined } from '@ant-design/icons';
-import { supabase, type Reconciliation } from '../../lib/supabase';
+import { CheckCircleOutlined, WarningOutlined, EyeOutlined, CheckOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { supabase, type Reconciliation, type Account } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth';
 
 interface RecRow extends Reconciliation {
   user_name?: string;
@@ -12,12 +13,78 @@ interface RecRow extends Reconciliation {
 }
 
 export default function AdminReconcile() {
+  const { user: admin } = useAuth();
   const [data, setData] = useState<RecRow[]>([]);
   const [filterUser, setFilterUser] = useState<string | undefined>();
   const [filterStatus, setFilterStatus] = useState<string | undefined>();
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedRec, setSelectedRec] = useState<RecRow | null>(null);
+
+  // 新增对账
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addUser, setAddUser] = useState('');
+  const [addAccount, setAddAccount] = useState('');
+  const [addAccounts, setAddAccounts] = useState<Account[]>([]);
+  const [addSysBalance, setAddSysBalance] = useState<number | null>(null);
+  const [addActBalance, setAddActBalance] = useState<number | null>(null);
+  const [addNotes, setAddNotes] = useState('');
+  const [addCalcLoading, setAddCalcLoading] = useState(false);
+
+  const loadUserAccounts = async (userId: string) => {
+    setAddAccount('');
+    setAddSysBalance(null);
+    if (!userId) { setAddAccounts([]); return; }
+    const { data: accs } = await supabase.from('accounts').select('*').eq('user_id', userId);
+    setAddAccounts(accs || []);
+  };
+
+  const calcBalance = async (accountId: string) => {
+    if (!accountId) { setAddSysBalance(null); return; }
+    setAddCalcLoading(true);
+    const acc = addAccounts.find(a => a.id === accountId);
+    if (!acc) { setAddCalcLoading(false); return; }
+    const [inc, exp, exIn, exOut] = await Promise.all([
+      supabase.from('transactions').select('amount').eq('to_account_id', accountId).eq('is_deleted', false),
+      supabase.from('transactions').select('amount').eq('from_account_id', accountId).eq('is_deleted', false),
+      supabase.from('transactions').select('to_amount').eq('to_account_id', accountId).eq('type', 'exchange').eq('is_deleted', false),
+      supabase.from('transactions').select('from_amount').eq('from_account_id', accountId).eq('type', 'exchange').eq('is_deleted', false),
+    ]);
+    const sum = (rows: any[] | null, field: string) => rows?.reduce((s: number, r: any) => s + (Number(r[field]) || 0), 0) || 0;
+    const bal = (Number(acc.initial_balance) || 0) + sum(inc.data, 'amount') - sum(exp.data, 'amount') + sum(exIn.data, 'to_amount') - sum(exOut.data, 'from_amount');
+    setAddSysBalance(bal);
+    setAddCalcLoading(false);
+  };
+
+  const handleAddReconcile = async () => {
+    if (!addUser || !addAccount || addActBalance === null) { message.error('请填写完整'); return; }
+    setAddLoading(true);
+    const diff = addActBalance - (addSysBalance || 0);
+    const { error } = await supabase.from('reconciliations').insert({
+      user_id: addUser,
+      account_id: addAccount,
+      reconcile_date: new Date().toISOString().slice(0, 10),
+      system_balance: addSysBalance,
+      actual_balance: addActBalance,
+      notes: addNotes || null,
+      submitted_by: admin?.id,
+      status: diff === 0 ? 'matched' : 'mismatch',
+    });
+    setAddLoading(false);
+    if (error) { message.error('提交失败: ' + error.message); return; }
+    message.success('已提交');
+    setAddOpen(false);
+    setAddUser(''); setAddAccount(''); setAddSysBalance(null);
+    setAddActBalance(null); setAddNotes('');
+    loadData();
+  };
+
+  const handleDelete = async (id: string) => {
+    await supabase.from('reconciliations').delete().eq('id', id);
+    message.success('已删除');
+    loadData();
+  };
 
   useEffect(() => {
     supabase.from('users').select('id, name').then(({ data: u }) => {
@@ -96,6 +163,9 @@ export default function AdminReconcile() {
           {r.status === 'mismatch' && (
             <Button size="small" type="primary" onClick={() => handleResolve(r.id)}>标记处理</Button>
           )}
+          <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
         </Space>
       ),
     },
@@ -105,6 +175,7 @@ export default function AdminReconcile() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>📊 对账管理</h2>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>新增对账</Button>
       </div>
 
       <Space wrap style={{ marginBottom: 16 }}>
@@ -170,6 +241,58 @@ export default function AdminReconcile() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* 新增对账弹窗 */}
+      <Modal
+        title="新增对账"
+        open={addOpen}
+        onCancel={() => { setAddOpen(false); setAddSysBalance(null); }}
+        onOk={handleAddReconcile}
+        confirmLoading={addLoading}
+        width={500}
+      >
+        <Form layout="vertical">
+          <Form.Item label="选择用户" required>
+            <Select value={addUser || undefined} onChange={(v) => { setAddUser(v); loadUserAccounts(v); }}
+              options={users.map(u => ({ label: u.name, value: u.id }))} placeholder="选择记账人" />
+          </Form.Item>
+          <Form.Item label="选择账户" required>
+            <Select value={addAccount || undefined}
+              onChange={(v) => { setAddAccount(v); calcBalance(v); }}
+              options={addAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
+              placeholder="先选用户" disabled={!addUser} />
+          </Form.Item>
+          <Form.Item label="系统余额">
+            <Input value={addSysBalance !== null ? addSysBalance.toLocaleString() : '请选择账户'} readOnly
+              style={{ fontWeight: 600, color: '#1677ff' }} />
+            {addCalcLoading && <span style={{ fontSize: 12, color: '#999' }}>计算中...</span>}
+          </Form.Item>
+          <Form.Item label="实际余额" required>
+            <InputNumber
+              value={addActBalance}
+              onChange={setAddActBalance}
+              placeholder="银行/钱包中的实际余额"
+              style={{ width: '100%' }}
+              precision={2}
+            />
+          </Form.Item>
+          {addActBalance !== null && addSysBalance !== null && (
+            (() => {
+              const diff = addActBalance - addSysBalance;
+              return (
+                <Form.Item label="差异">
+                  <span style={{ fontSize: 18, fontWeight: 700, color: diff === 0 ? '#52c41a' : '#ff4d4f' }}>
+                    {diff === 0 ? '✅ 一致' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)}`}
+                  </span>
+                </Form.Item>
+              );
+            })()
+          )}
+          <Form.Item label="备注">
+            <Input.TextArea value={addNotes} onChange={(e) => setAddNotes(e.target.value)} rows={2} />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Table, Card, Statistic, Row, Col, Button, Modal, Form, Input, Select, InputNumber, message, Popconfirm, Space } from 'antd';
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { supabase, type AccountBalance, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
+import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { supabase, type AccountBalance, type Account, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
 
 interface AccountRow extends AccountBalance {
   user_name?: string;
@@ -30,6 +30,27 @@ export default function AdminAccounts() {
     message.success('已添加');
     setAddOpen(false);
     setNewAccount({ user_id: '', account_type: '', name: '', currency: '', initial_balance: '0' });
+    loadBalances();
+  };
+
+  // 编辑账户
+  const [editOpen, setEditOpen] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editAccount, setEditAccount] = useState<Account | null>(null);
+
+  const handleSaveEdit = async () => {
+    if (!editAccount) return;
+    setEditLoading(true);
+    const { error } = await supabase.from('accounts').update({
+      account_type: editAccount.account_type,
+      name: editAccount.name,
+      currency: editAccount.currency,
+      initial_balance: editAccount.initial_balance,
+    }).eq('id', editAccount.id);
+    setEditLoading(false);
+    if (error) { message.error('保存失败: ' + error.message); return; }
+    message.success('已保存');
+    setEditOpen(false);
     loadBalances();
   };
 
@@ -110,9 +131,20 @@ export default function AdminAccounts() {
     {
       title: '操作', key: 'actions', width: 100,
       render: (_: any, r: AccountRow) => (
-        <Popconfirm title="确定删除此账户?" onConfirm={() => handleDeleteAccount(r.account_id)}>
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+        <Space>
+          <Button size="small" icon={<EditOutlined />} onClick={() => {
+            setEditAccount({
+              id: r.account_id, user_id: r.user_id,
+              account_type: r.account_type, name: r.name,
+              currency: r.currency, initial_balance: r.initial_balance,
+              created_at: '',
+            } as Account);
+            setEditOpen(true);
+          }} />
+          <Popconfirm title="确定删除此账户?" onConfirm={() => handleDeleteAccount(r.account_id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -153,6 +185,27 @@ export default function AdminAccounts() {
             <InputNumber value={parseFloat(newAccount.initial_balance) || 0} onChange={(v) => setNewAccount({ ...newAccount, initial_balance: String(v || 0) })} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal title="编辑账户" open={editOpen} onCancel={() => setEditOpen(false)} onOk={handleSaveEdit} confirmLoading={editLoading}>
+        {editAccount && (
+          <Form layout="vertical">
+            <Form.Item label="账户类型">
+              <Select value={editAccount.account_type} onChange={(v) => setEditAccount({ ...editAccount, account_type: v })}
+                options={ACCOUNT_TYPES.map(t => ({ label: `${t.icon} ${t.label}`, value: t.value }))} />
+            </Form.Item>
+            <Form.Item label="账户名称">
+              <Input value={editAccount.name} onChange={(e) => setEditAccount({ ...editAccount, name: e.target.value })} />
+            </Form.Item>
+            <Form.Item label="币种">
+              <Select value={editAccount.currency} onChange={(v) => setEditAccount({ ...editAccount, currency: v })}
+                options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))} />
+            </Form.Item>
+            <Form.Item label="期初余额">
+              <InputNumber value={editAccount.initial_balance} onChange={(v) => setEditAccount({ ...editAccount, initial_balance: v || 0 })} style={{ width: '100%' }} />
+            </Form.Item>
+          </Form>
+        )}
       </Modal>
     </div>
   );

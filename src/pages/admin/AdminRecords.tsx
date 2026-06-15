@@ -111,11 +111,16 @@ export default function AdminRecords() {
     dayjs().subtract(30, 'day'), dayjs(),
   ]);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const [filterAccountId, setFilterAccountId] = useState('');
+  const [allAccounts, setAllAccounts] = useState<{ id: string; name: string; currency: string; user_id: string }[]>([]);
 
-  // 加载用户列表
+  // 加载用户和账户列表
   useEffect(() => {
     supabase.from('users').select('id, name').then(({ data }) => {
       if (data) setUsers(data);
+    });
+    supabase.from('accounts').select('id, name, currency, user_id').then(({ data }) => {
+      if (data) setAllAccounts(data);
     });
   }, []);
 
@@ -165,11 +170,10 @@ export default function AdminRecords() {
         }
       });
 
-      if (filterUser) {
-        setData(rows.filter(r => r.user_id === filterUser));
-      } else {
-        setData(rows);
-      }
+      let filtered = rows;
+      if (filterUser) { filtered = filtered.filter(r => r.user_id === filterUser); }
+      if (filterAccountId) { filtered = filtered.filter(r => r.from_account_id === filterAccountId || r.to_account_id === filterAccountId); }
+      setData(filtered);
     }
     setLoading(false);
   }, [filterType, filterCurrency, filterDateRange, filterUser]);
@@ -330,6 +334,12 @@ export default function AdminRecords() {
           value={filterCurrency || undefined}
           onChange={(v) => setFilterCurrency(v || '')}
           options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))}
+        />
+        <Select
+          placeholder="按账户" allowClear style={{ width: 160 }}
+          value={filterAccountId || undefined}
+          onChange={(v) => setFilterAccountId(v || '')}
+          options={allAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
         />
         <DatePicker.RangePicker
           value={filterDateRange}

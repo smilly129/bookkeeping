@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Table, Card, Statistic, Row, Col, Button, Modal, Form, Input, Select, InputNumber, message, Popconfirm, Space } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, ExportOutlined } from '@ant-design/icons';
 import { supabase, type AccountBalance, type Account, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
 
 interface AccountRow extends AccountBalance {
@@ -108,6 +108,21 @@ export default function AdminAccounts() {
 
   const filteredData = filterUser ? data.filter(r => r.user_id === filterUser) : data;
 
+  const handleExport = () => {
+    const headers = ['姓名', '类型', '名称', '币种', '期初余额', '当前余额'];
+    const rows = filteredData.map(r => [
+      r.user_name, ACCOUNT_TYPES.find(t => t.value === r.account_type)?.label || r.account_type,
+      r.name, r.currency, r.initial_balance, r.current_balance,
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c ?? ''}"`).join(','))].join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `账户总表_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    message.success('导出成功');
+  };
+
   const currencyTotals: Record<string, number> = {};
   filteredData.forEach(r => {
     if (!currencyTotals[r.currency]) currencyTotals[r.currency] = 0;
@@ -164,6 +179,7 @@ export default function AdminAccounts() {
             options={users.map(u => ({ label: u.name, value: u.id }))}
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>新增账户</Button>
+          <Button icon={<ExportOutlined />} onClick={handleExport}>导出</Button>
         </Space>
       </div>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>

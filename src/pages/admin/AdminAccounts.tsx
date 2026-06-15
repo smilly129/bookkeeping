@@ -11,6 +11,7 @@ export default function AdminAccounts() {
   const [data, setData] = useState<AccountRow[]>([]);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [filterUser, setFilterUser] = useState<string | undefined>();
 
   // 新增账户
   const [addOpen, setAddOpen] = useState(false);
@@ -105,8 +106,10 @@ export default function AdminAccounts() {
     }
   }, [users]);
 
+  const filteredData = filterUser ? data.filter(r => r.user_id === filterUser) : data;
+
   const currencyTotals: Record<string, number> = {};
-  data.forEach(r => {
+  filteredData.forEach(r => {
     if (!currencyTotals[r.currency]) currencyTotals[r.currency] = 0;
     currencyTotals[r.currency] += r.current_balance;
   });
@@ -153,7 +156,15 @@ export default function AdminAccounts() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>🏦 账户余额总表</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>新增账户</Button>
+        <Space>
+          <Select
+            placeholder="按人筛选" allowClear style={{ width: 120 }}
+            value={filterUser}
+            onChange={setFilterUser}
+            options={users.map(u => ({ label: u.name, value: u.id }))}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>新增账户</Button>
+        </Space>
       </div>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         {Object.entries(currencyTotals).map(([cur, total]) => (
@@ -162,7 +173,7 @@ export default function AdminAccounts() {
           </Col>
         ))}
       </Row>
-      <Table columns={columns} dataSource={data} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 900 }} />
+      <Table columns={columns} dataSource={filteredData} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 900 }} />
 
       <Modal title="新增账户" open={addOpen} onCancel={() => setAddOpen(false)} onOk={handleAddAccount} confirmLoading={addLoading}>
         <Form layout="vertical">

@@ -56,6 +56,12 @@ export interface Transaction {
   updated_at?: string;
   updated_by?: string;
   is_deleted: boolean;
+  // 业务管理模块扩展字段
+  customer_id?: string;
+  business_type?: 'exchange' | 'purchase' | 'other';
+  rate_direction?: 'divide' | 'multiply';
+  theoretical_cost?: number;
+  purchase_id?: string;
 }
 
 export interface Reconciliation {
@@ -111,4 +117,79 @@ export const TRANSFER_DIRECTIONS = [
   { value: 'international_international', label: '国外转国外' },
   { value: 'domestic_international', label: '国内转国外' },
   { value: 'international_domestic', label: '国外转国内' },
+] as const;
+
+// ========== 业务员管理模块新增类型 ==========
+
+export interface Salesperson {
+  id: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface Customer {
+  id: string;
+  code: string;
+  name?: string;
+  salesperson_id: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface Purchase {
+  id: string;
+  customer_id: string;
+  salesperson_id: string;
+  user_id: string;
+  currency: string;
+  quoted_price?: number;
+  actual_cost?: number;
+  status: 'in_progress' | 'completed';
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface PurchaseSummary extends Purchase {
+  customer_code: string;
+  salesperson_name: string;
+  total_received: number;
+  shortfall: number;
+  profit: number;
+}
+
+export interface AssetOverride {
+  id: string;
+  salesperson_id: string;
+  currency: string;
+  estimated_rate?: number;
+  notes?: string;
+  updated_at: string;
+}
+
+// 业务类型常量
+export const BUSINESS_TYPES = [
+  { value: 'exchange', label: '换汇' },
+  { value: 'purchase', label: '采购' },
+  { value: 'other', label: '其他' },
+] as const;
+
+// 收付方向常量
+export const LEDGER_DIRECTIONS = [
+  { value: 'receive', label: '收' },
+  { value: 'pay', label: '付' },
+] as const;
+
+// 汇率方向常量
+export const RATE_DIRECTIONS = [
+  { value: 'divide', label: '÷ (外币÷汇率=RMB)', desc: '如RUB：1元=12.5卢布' },
+  { value: 'multiply', label: '× (外币×汇率=RMB)', desc: '如USDT：1U=6.65元' },
+] as const;
+
+// 采购状态常量
+export const PURCHASE_STATUSES = [
+  { value: 'in_progress', label: '进行中' },
+  { value: 'completed', label: '已完成' },
 ] as const;

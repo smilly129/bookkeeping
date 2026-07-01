@@ -5,6 +5,8 @@ import {
   DashboardOutlined, TableOutlined, CheckCircleOutlined,
   WalletOutlined, BarChartOutlined, UserOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined,
+  ShopOutlined, ShoppingCartOutlined, AuditOutlined,
+  PieChartOutlined, TeamOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../hooks/useAuth';
 import AdminDashboard from './AdminDashboard';
@@ -13,6 +15,10 @@ import AdminReconcile from './AdminReconcile';
 import AdminAccounts from './AdminAccounts';
 import AdminReports from './AdminReports';
 import AdminUsers from './AdminUsers';
+import AdminSalesManage from './AdminSalesManage';
+import AdminPurchases from './AdminPurchases';
+import AdminCustomerBalances from './AdminCustomerBalances';
+import AdminAssets from './AdminAssets';
 
 const { Header, Sider, Content } = Layout;
 
@@ -22,6 +28,19 @@ const menuItems = [
   { key: '/reconcile', icon: <CheckCircleOutlined />, label: '对账管理' },
   { key: '/accounts', icon: <WalletOutlined />, label: '账户总表' },
   { key: '/reports', icon: <BarChartOutlined />, label: '汇总报表' },
+  { type: 'divider' as const },
+  {
+    key: 'sales-group',
+    icon: <ShopOutlined />,
+    label: '业务管理',
+    children: [
+      { key: '/sales/purchases', icon: <ShoppingCartOutlined />, label: '采购管理' },
+      { key: '/sales/customer-balances', icon: <AuditOutlined />, label: '客户对账' },
+      { key: '/sales/assets', icon: <PieChartOutlined />, label: '资产总表' },
+      { key: '/sales/manage', icon: <TeamOutlined />, label: '业务员/客户' },
+    ],
+  },
+  { type: 'divider' as const },
   { key: '/users', icon: <UserOutlined />, label: '用户管理' },
 ];
 
@@ -104,6 +123,10 @@ export default function AdminLayout() {
             <Route path="/accounts" element={<AdminAccounts />} />
             <Route path="/reports" element={<AdminReports />} />
             <Route path="/users" element={<AdminUsers />} />
+            <Route path="/sales/manage" element={<AdminSalesManage />} />
+            <Route path="/sales/purchases" element={<AdminPurchases />} />
+            <Route path="/sales/customer-balances" element={<AdminCustomerBalances />} />
+            <Route path="/sales/assets" element={<AdminAssets />} />
           </Routes>
         </Content>
       </Layout>

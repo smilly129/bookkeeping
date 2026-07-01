@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Table, Button, Input, Select, DatePicker, Space, Tag, Modal,
-  Form, InputNumber, message, Popconfirm, Image,
+  Form, InputNumber, message, Popconfirm, Image, Collapse,
 } from 'antd';
-import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { supabase, type Transaction, type Account, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS } from '../../lib/supabase';
+import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined, DownOutlined } from '@ant-design/icons';
+import { supabase, type Transaction, type Account, type Customer, type Salesperson, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS, BUSINESS_TYPES, RATE_DIRECTIONS } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
 interface TxRow extends Transaction {
@@ -12,6 +12,8 @@ interface TxRow extends Transaction {
   from_account_name?: string;
   to_account_name?: string;
   _isDuplicate?: boolean;
+  customer_code?: string;
+  salesperson_name?: string;
 }
 
 export default function AdminRecords() {
@@ -30,6 +32,8 @@ export default function AdminRecords() {
     from_account_id: '', to_account_id: '',
     transaction_date: dayjs(),
     notes: '',
+    // 业务字段
+    customer_id: '', business_type: '', rate_direction: 'divide' as string, purchase_id: '',
   });
   const [addAccounts, setAddAccounts] = useState<Account[]>([]);
 
@@ -46,11 +50,28 @@ export default function AdminRecords() {
     if (!r.user_id || !r.type) { message.error('请选择用户和类型'); return; }
     setAddLoading(true);
 
-    const base = {
+    const base: any = {
       user_id: r.user_id,
       transaction_date: dayjs(r.transaction_date).format('YYYY-MM-DD'),
       notes: r.notes || null,
     };
+    // 业务字段（可选）
+    if (r.customer_id) {
+      base.customer_id = r.customer_id;
+      base.business_type = r.business_type || null;
+      base.rate_direction = r.rate_direction || null;
+      base.purchase_id = r.purchase_id || null;
+      // 自动计算理论成本
+      if (r.rate_direction && r.exchange_rate && (r.amount || r.from_amount)) {
+        const amt = parseFloat(r.amount || r.from_amount);
+        const rate = parseFloat(r.exchange_rate);
+        if (rate && amt) {
+          base.theoretical_cost = r.rate_direction === 'divide'
+            ? +(amt / rate).toFixed(4)
+            : +(amt * rate).toFixed(4);
+        }
+      }
+    }
 
     let data: any = {};
     switch (r.type) {
@@ -99,7 +120,7 @@ export default function AdminRecords() {
     if (error) { message.error('添加失败: ' + error.message); return; }
     message.success('已添加');
     setAddModalOpen(false);
-    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '' });
+    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '', customer_id: '', business_type: '', rate_direction: 'divide', purchase_id: '' });
     loadData();
   };
 
@@ -113,14 +134,31 @@ export default function AdminRecords() {
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [filterAccountId, setFilterAccountId] = useState('');
   const [allAccounts, setAllAccounts] = useState<{ id: string; name: string; currency: string; user_id: string }[]>([]);
+  const [filterCustomer, setFilterCustomer] = useState('');
 
-  // 加载用户和账户列表
+  // 业务管理模块相关
+  const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+  const [custBySp, setCustBySp] = useState<Customer[]>([]); // 按业务员筛选的客户
+  const [allPurchases, setAllPurchases] = useState<{ id: string; customer_id: string; quoted_price: number; }[]>([]);
+
+  // 加载用户和账户列表 + 业务模块数据
   useEffect(() => {
     supabase.from('users').select('id, name').then(({ data }) => {
       if (data) setUsers(data);
     });
     supabase.from('accounts').select('id, name, currency, user_id').then(({ data }) => {
       if (data) setAllAccounts(data);
+    });
+    // 业务模块: 加载业务员、客户、采购列表
+    supabase.from('salespersons').select('*').order('name').then(({ data }) => {
+      if (data) setSalespersons(data);
+    });
+    supabase.from('customers').select('*, salesperson: salesperson_id(name)').order('code').then(({ data }) => {
+      if (data) setAllCustomers(data as any);
+    });
+    supabase.from('purchases').select('id, customer_id, quoted_price').eq('status', 'in_progress').then(({ data }) => {
+      if (data) setAllPurchases(data);
     });
   }, []);
 
@@ -130,7 +168,8 @@ export default function AdminRecords() {
     let query = supabase.from('transactions').select(`
       *,
       from_acc:from_account_id(name),
-      to_acc:to_account_id(name)
+      to_acc:to_account_id(name),
+      customer:customer_id(code, salesperson_id, salesperson:salesperson_id(name))
     `).eq('is_deleted', false)
       .gte('transaction_date', filterDateRange[0].format('YYYY-MM-DD'))
       .lte('transaction_date', filterDateRange[1].format('YYYY-MM-DD'))
@@ -141,6 +180,9 @@ export default function AdminRecords() {
     if (filterType) query = query.eq('type', filterType);
     if (filterCurrency) {
       query = query.or(`currency.eq.${filterCurrency},from_currency.eq.${filterCurrency},to_currency.eq.${filterCurrency}`);
+    }
+    if (filterCustomer) {
+      query = query.eq('customer_id', filterCustomer);
     }
 
     const { data: txData } = await query;
@@ -155,6 +197,8 @@ export default function AdminRecords() {
         user_name: userMap.get(t.user_id) || t.user_id,
         from_account_name: (t as any).from_acc?.name,
         to_account_name: (t as any).to_acc?.name,
+        customer_code: (t as any).customer?.code || '',
+        salesperson_name: (t as any).customer?.salesperson?.name || '',
       }));
 
       // 疑似重复检测：同用户 + 同日期 + 同类型 + 同金额
@@ -176,14 +220,14 @@ export default function AdminRecords() {
       setData(filtered);
     }
     setLoading(false);
-  }, [filterType, filterCurrency, filterDateRange, filterUser]);
+  }, [filterType, filterCurrency, filterDateRange, filterUser, filterCustomer]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   // 编辑保存
   const handleSaveEdit = async () => {
     if (!editingRow) return;
-    const { error } = await supabase.from('transactions').update({
+    const updateData: any = {
       type: editingRow.type,
       direction: editingRow.direction,
       currency: editingRow.currency,
@@ -198,7 +242,30 @@ export default function AdminRecords() {
       notes: editingRow.notes,
       transaction_date: editingRow.transaction_date,
       updated_at: new Date().toISOString(),
-    }).eq('id', editingRow.id);
+    };
+    if (editingRow.customer_id) {
+      updateData.customer_id = editingRow.customer_id;
+      updateData.business_type = editingRow.business_type || null;
+      updateData.rate_direction = editingRow.rate_direction || null;
+      updateData.purchase_id = editingRow.purchase_id || null;
+      // 自动计算理论成本
+      if (editingRow.rate_direction && editingRow.exchange_rate && (editingRow.amount || editingRow.from_amount)) {
+        const amt = editingRow.amount || editingRow.from_amount || 0;
+        const rate = editingRow.exchange_rate || 0;
+        if (rate && amt) {
+          updateData.theoretical_cost = editingRow.rate_direction === 'divide'
+            ? +(amt / rate).toFixed(4)
+            : +(amt * rate).toFixed(4);
+        }
+      }
+    } else {
+      updateData.customer_id = null;
+      updateData.business_type = null;
+      updateData.rate_direction = null;
+      updateData.purchase_id = null;
+      updateData.theoretical_cost = null;
+    }
+    const { error } = await supabase.from('transactions').update(updateData).eq('id', editingRow.id);
 
     if (error) {
       message.error('保存失败');
@@ -290,6 +357,18 @@ export default function AdminRecords() {
     },
     { title: '备注', dataIndex: 'notes', key: 'notes', width: 150, ellipsis: true },
     {
+      title: '客户', dataIndex: 'customer_code', key: 'customer', width: 100,
+      render: (code: string, r: TxRow) => code ? <Tag color="blue">{code}</Tag> : null,
+    },
+    {
+      title: '业务类型', dataIndex: 'business_type', key: 'biz_type', width: 80,
+      render: (t: string) => {
+        if (!t) return null;
+        const m: Record<string, string> = { exchange: '🔄换汇', purchase: '🛒采购', other: '📌其他' };
+        return <Tag>{m[t] || t}</Tag>;
+      },
+    },
+    {
       title: '操作', key: 'actions', width: 100, fixed: 'right' as const,
       render: (_: any, record: TxRow) => (
         <Space>
@@ -340,6 +419,14 @@ export default function AdminRecords() {
           value={filterAccountId || undefined}
           onChange={(v) => setFilterAccountId(v || '')}
           options={allAccounts.map(a => ({ label: `${a.name} (${a.currency})`, value: a.id }))}
+        />
+        <Select
+          placeholder="按客户" allowClear style={{ width: 140 }}
+          value={filterCustomer || undefined}
+          onChange={(v) => setFilterCustomer(v || '')}
+          options={allCustomers.map(c => ({ label: `${c.code}`, value: c.id }))}
+          showSearch
+          filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
         />
         <DatePicker.RangePicker
           value={filterDateRange}
@@ -406,6 +493,59 @@ export default function AdminRecords() {
             <Form.Item label="备注">
               <Input.TextArea value={editingRow.notes || ''} onChange={(e) => setEditingRow({ ...editingRow, notes: e.target.value })} rows={2} />
             </Form.Item>
+            <Collapse
+              ghost
+              size="small"
+              items={[{
+                key: 'biz',
+                label: <span style={{ fontSize: 13, color: '#1677ff' }}>▶ 业务信息 {editingRow.customer_id ? '(已关联)' : ''}</span>,
+                children: (
+                  <div style={{ padding: '8px 0' }}>
+                    <Form.Item label="客户代号">
+                      <Select
+                        value={editingRow.customer_id || undefined}
+                        onChange={(v) => setEditingRow({ ...editingRow, customer_id: v || '' })}
+                        options={allCustomers.map(c => ({
+                          label: `${c.code}${editingRow.salesperson_name ? ` (${editingRow.salesperson_name})` : ''}`,
+                          value: c.id,
+                        }))}
+                        placeholder="选择客户"
+                        showSearch
+                        filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
+                        allowClear
+                      />
+                    </Form.Item>
+                    <Form.Item label="业务类型">
+                      <Select
+                        value={editingRow.business_type || undefined}
+                        onChange={(v) => setEditingRow({ ...editingRow, business_type: v || '' })}
+                        options={BUSINESS_TYPES.map(b => ({ label: b.label, value: b.value }))}
+                        allowClear
+                      />
+                    </Form.Item>
+                    <Form.Item label="汇率方向">
+                      <Select
+                        value={editingRow.rate_direction || undefined}
+                        onChange={(v) => setEditingRow({ ...editingRow, rate_direction: v || '' })}
+                        options={RATE_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))}
+                        allowClear
+                      />
+                    </Form.Item>
+                    <Form.Item label="关联采购">
+                      <Select
+                        value={editingRow.purchase_id || undefined}
+                        onChange={(v) => setEditingRow({ ...editingRow, purchase_id: v || '' })}
+                        options={allPurchases
+                          .filter(p => p.customer_id === editingRow.customer_id)
+                          .map(p => ({ label: `报价 ${p.quoted_price || '—'}`, value: p.id }))}
+                        placeholder="关联到采购记录（可选）"
+                        allowClear
+                      />
+                    </Form.Item>
+                  </div>
+                ),
+              }]}
+            />
           </Form>
         )}
       </Modal>
@@ -581,6 +721,113 @@ export default function AdminRecords() {
               onChange={(date) => { if (date) setNewRecord({ ...newRecord, transaction_date: date }); }}
             />
           </Form.Item>
+
+          {/* 业务信息（折叠区域） */}
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'biz',
+              label: <span style={{ fontSize: 13, color: '#1677ff' }}>▶ 业务信息</span>,
+              children: (
+                <div style={{ padding: '8px 0' }}>
+                  <Form.Item label="业务员">
+                    <Select
+                      value={newRecord.user_id || undefined}
+                      onChange={(v) => {
+                        const spId = v || '';
+                        setNewRecord({ ...newRecord, user_id: spId, customer_id: '', purchase_id: '' });
+                        if (spId) {
+                          supabase.from('customers').select('*, salesperson: salesperson_id(name)')
+                            .eq('salesperson_id', spId).order('code')
+                            .then(({ data }) => { if (data) setCustBySp(data as any); });
+                        } else { setCustBySp([]); }
+                      }}
+                      options={salespersons.map(s => ({ label: s.name, value: s.id }))}
+                      placeholder="选择业务员（选后加载客户）"
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Form.Item label="客户代号">
+                    <Select
+                      value={newRecord.customer_id || undefined}
+                      onChange={(v) => {
+                        const custId = v || '';
+                        const cust = allCustomers.find(c => c.id === custId);
+                        setNewRecord({
+                          ...newRecord,
+                          customer_id: custId,
+                          purchase_id: '',
+                        });
+                      }}
+                      options={(custBySp.length > 0 ? custBySp : allCustomers).map(c => ({
+                        label: `${c.code}${(c as any).salesperson?.name ? ` (${(c as any).salesperson.name})` : ''}`,
+                        value: c.id,
+                      }))}
+                      placeholder="选择客户"
+                      showSearch
+                      filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Form.Item label="业务类型">
+                    <Select
+                      value={newRecord.business_type || undefined}
+                      onChange={(v) => {
+                        setNewRecord({ ...newRecord, business_type: v || '', purchase_id: '' });
+                      }}
+                      options={BUSINESS_TYPES.map(b => ({ label: b.label, value: b.value }))}
+                      allowClear
+                    />
+                  </Form.Item>
+                  {(newRecord.type === 'exchange' || newRecord.type === 'income' || newRecord.type === 'expense') && (
+                    <Form.Item label="汇率方向">
+                      <Select
+                        value={newRecord.rate_direction || undefined}
+                        onChange={(v) => setNewRecord({ ...newRecord, rate_direction: v || 'divide' })}
+                        options={RATE_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))}
+                      />
+                    </Form.Item>
+                  )}
+                  {newRecord.customer_id && newRecord.rate_direction && newRecord.exchange_rate && (newRecord.amount || newRecord.from_amount) && (
+                    <Form.Item label="理论成本（自动）">
+                      <Input
+                        value={
+                          (() => {
+                            const amt = parseFloat(newRecord.amount || newRecord.from_amount);
+                            const rate = parseFloat(newRecord.exchange_rate);
+                            if (rate && amt) {
+                              const tc = newRecord.rate_direction === 'divide'
+                                ? (amt / rate).toFixed(4)
+                                : (amt * rate).toFixed(4);
+                              return `${tc} RMB`;
+                            }
+                            return '—';
+                          })()
+                        }
+                        readOnly
+                        style={{ color: '#888' }}
+                      />
+                    </Form.Item>
+                  )}
+                  {newRecord.business_type === 'purchase' && newRecord.customer_id && (
+                    <Form.Item label="关联采购">
+                      <Select
+                        value={newRecord.purchase_id || undefined}
+                        onChange={(v) => setNewRecord({ ...newRecord, purchase_id: v || '' })}
+                        options={allPurchases
+                          .filter(p => p.customer_id === newRecord.customer_id)
+                          .map(p => ({ label: `报价 ${p.quoted_price || '—'}`, value: p.id }))}
+                        placeholder="关联到采购记录（可选）"
+                        allowClear
+                      />
+                    </Form.Item>
+                  )}
+                </div>
+              ),
+            }]}
+          />
+
           <Form.Item label="备注">
             <Input.TextArea value={newRecord.notes} onChange={(e) => setNewRecord({ ...newRecord, notes: e.target.value })} rows={2} />
           </Form.Item>

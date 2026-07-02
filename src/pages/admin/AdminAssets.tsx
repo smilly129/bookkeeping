@@ -102,10 +102,11 @@ export default function AdminAssets() {
     });
 
     // 重新整理：需要先加载 customers 获取 salesperson 信息
-    const { data: custData } = await supabase.from('customers').select('id, salesperson_id, salesperson:salesperson_id(name)');
+    const { data: custData } = await supabase.from('customers').select('id, salesperson_id');
     const custMap = new Map<string, { spId: string; spName: string }>();
+    const spNameMap = new Map(salespersons.map(s => [s.id, s.name]));
     custData?.forEach((c: any) => {
-      custMap.set(c.id, { spId: c.salesperson_id, spName: c.salesperson?.name || '' });
+      custMap.set(c.id, { spId: c.salesperson_id, spName: spNameMap.get(c.salesperson_id) || '' });
     });
 
     entries.forEach(e => {

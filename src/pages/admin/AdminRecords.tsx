@@ -161,7 +161,7 @@ export default function AdminRecords() {
     supabase.from('salespersons').select('*').order('name').then(({ data }) => {
       if (data) setSalespersons(data);
     });
-    supabase.from('customers').select('*, salesperson: salesperson_id(name)').order('code').then(({ data }) => {
+    supabase.from('customers').select('*').order('code').then(({ data }) => {
       if (data) setAllCustomers(data as any);
     });
     supabase.from('purchases').select('id, customer_id, quoted_price').eq('status', 'in_progress').then(({ data }) => {
@@ -183,8 +183,7 @@ export default function AdminRecords() {
     let query = supabase.from('transactions').select(`
       *,
       from_acc:from_account_id(name),
-      to_acc:to_account_id(name),
-      customer:customer_id(code, salesperson_id)
+      to_acc:to_account_id(name)
     `).eq('is_deleted', false)
       .gte('transaction_date', filterDateRange[0].format('YYYY-MM-DD'))
       .lte('transaction_date', filterDateRange[1].format('YYYY-MM-DD'))
@@ -207,18 +206,17 @@ export default function AdminRecords() {
       const { data: userData } = await supabase.from('users').select('id, name').in('id', userIds);
       const userMap = new Map(userData?.map(u => [u.id, u.name]) || []);
 
+      // 构建客户查找 Map
+      const custMap = new Map(allCustomers.map(c => [c.id, c]));
+      const spMap = new Map(salespersons.map(s => [s.id, s.name]));
+
       const rows: TxRow[] = txData.map(t => ({
         ...t,
         user_name: userMap.get(t.user_id) || t.user_id,
         from_account_name: (t as any).from_acc?.name,
         to_account_name: (t as any).to_acc?.name,
-        customer_code: (t as any).customer?.code || '',
-        salesperson_name: (() => {
-          const custId = (t as any).customer?.salesperson_id;
-          if (!custId) return '';
-          const sp = salespersons.find(s => s.id === custId);
-          return sp?.name || '';
-        })(),
+        customer_code: t.customer_id ? (custMap.get(t.customer_id)?.code || '') : '',
+        salesperson_name: t.customer_id ? (spMap.get(custMap.get(t.customer_id)?.salesperson_id || '') || '') : '',
       }));
 
       // 疑似重复检测：同用户 + 同日期 + 同类型 + 同金额

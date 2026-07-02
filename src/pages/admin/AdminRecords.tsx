@@ -489,7 +489,16 @@ export default function AdminRecords() {
       title: '操作', key: 'actions', width: 100, fixed: 'right' as const,
       render: (_: any, record: TxRow) => (
         <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => { setEditingRow({ ...record }); setEditModalOpen(true); }} />
+          <Button size="small" icon={<EditOutlined />} onClick={() => {
+            const row = { ...record };
+            // 如果 customer_code 为空但有 customer_id，从缓存补充
+            if (!row.customer_code && row.customer_id) {
+              const c = allCustomers.find(x => x.id === row.customer_id);
+              if (c) row.customer_code = c.code;
+            }
+            setEditingRow(row);
+            setEditModalOpen(true);
+          }} />
           <Popconfirm title="确定删除?" onConfirm={() => handleDelete(record.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>

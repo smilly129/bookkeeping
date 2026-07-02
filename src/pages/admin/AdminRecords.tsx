@@ -34,7 +34,7 @@ export default function AdminRecords() {
     transaction_date: dayjs(),
     notes: '',
     // 业务字段
-    customer_id: '', business_type: '', rate_direction: 'divide' as string, purchase_id: '',
+    customer_id: '', business_type: '', purchase_id: '',
   });
   const [addAccounts, setAddAccounts] = useState<Account[]>([]);
 
@@ -60,17 +60,12 @@ export default function AdminRecords() {
     if (r.customer_id) {
       base.customer_id = r.customer_id;
       base.business_type = r.business_type || null;
-      base.rate_direction = r.rate_direction || null;
       base.purchase_id = r.purchase_id || null;
-      // 自动计算理论成本
-      if (r.rate_direction && r.exchange_rate && (r.amount || r.from_amount)) {
+      // 理论成本 = 金额 × 汇率（汇率=1外币=?RMB）
+      if (r.exchange_rate && (r.amount || r.from_amount)) {
         const amt = parseFloat(r.amount || r.from_amount);
         const rate = parseFloat(r.exchange_rate);
-        if (rate && amt) {
-          base.theoretical_cost = r.rate_direction === 'divide'
-            ? +(amt / rate).toFixed(4)
-            : +(amt * rate).toFixed(4);
-        }
+        if (rate && amt) base.theoretical_cost = +(amt * rate).toFixed(4);
       }
     }
 
@@ -121,7 +116,7 @@ export default function AdminRecords() {
     if (error) { message.error('添加失败: ' + error.message); return; }
     message.success('已添加');
     setAddModalOpen(false);
-    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '', customer_id: '', business_type: '', rate_direction: 'divide', purchase_id: '' });
+    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '', customer_id: '', business_type: '', purchase_id: '' });
     loadData();
   };
 
@@ -264,24 +259,18 @@ export default function AdminRecords() {
     if (editingRow.customer_id) {
       updateData.customer_id = editingRow.customer_id;
       updateData.business_type = editingRow.business_type || null;
-      updateData.rate_direction = editingRow.rate_direction || null;
       updateData.purchase_id = editingRow.purchase_id || null;
-      // 自动计算理论成本
-      if (editingRow.rate_direction && editingRow.exchange_rate && (editingRow.amount || editingRow.from_amount)) {
+      if (editingRow.exchange_rate && (editingRow.amount || editingRow.from_amount)) {
         const amt = editingRow.amount || editingRow.from_amount || 0;
         const rate = editingRow.exchange_rate || 0;
-        if (rate && amt) {
-          updateData.theoretical_cost = editingRow.rate_direction === 'divide'
-            ? +(amt / rate).toFixed(4)
-            : +(amt * rate).toFixed(4);
-        }
+        if (rate && amt) updateData.theoretical_cost = +(amt * rate).toFixed(4);
       }
     } else {
       updateData.customer_id = null;
       updateData.business_type = null;
-      updateData.rate_direction = null;
       updateData.purchase_id = null;
       updateData.theoretical_cost = null;
+      updateData.rate_direction = null;
     }
     const { error } = await supabase.from('transactions').update(updateData).eq('id', editingRow.id);
 
@@ -348,6 +337,24 @@ export default function AdminRecords() {
     if (!users[0]) { message.error('没有可用的记账人'); return; }
 
     setQuickLoading(true);
+
+    // 客户不存在则自动创建
+    let custId = r.customerId;
+    if (r.customerCode && !custId) {
+      const spId = salespersons[0]?.id || ''; // 默认关联第一个业务员
+      const { data: newCust, error: custErr } = await supabase.from('customers').insert({
+        code: r.customerCode,
+        salesperson_id: spId || null,
+      }).select('id').single();
+      if (!custErr && newCust) {
+        custId = newCust.id;
+        // 刷新客户列表
+        supabase.from('customers').select('*').order('code').then(({ data }) => {
+          if (data) setAllCustomers(data as any);
+        });
+      }
+    }
+
     const base: any = {
       user_id: users[0].id,
       type: r.type,
@@ -357,20 +364,18 @@ export default function AdminRecords() {
       notes: r.notes || null,
     };
 
-    // 方向
     if (r.type === 'expense') {
-      base.direction = 'international';
       base.from_account_id = r.accountId || null;
     } else {
-      base.direction = 'international';
       base.to_account_id = r.accountId || null;
     }
 
-    // 业务字段
-    if (r.customerId) {
-      base.customer_id = r.customerId;
+    if (custId) {
+      base.customer_id = custId;
       base.business_type = 'other';
     }
+    if (r.exchange_rate) base.exchange_rate = r.exchange_rate;
+    if (r.theoretical_cost) base.theoretical_cost = r.theoretical_cost;
 
     const { error } = await supabase.from('transactions').insert(base);
     setQuickLoading(false);
@@ -378,7 +383,11 @@ export default function AdminRecords() {
     if (error) {
       message.error('录入失败: ' + error.message);
     } else {
-      message.success(`✅ 已录入: ${r.type === 'income' ? '收款' : '付款'} ${r.amount.toLocaleString()} ${r.currency}${r.customerCode ? ` 客户${r.customerCode}` : ''}${r.accountName ? ` → ${r.accountName}` : ''}`);
+      let msg = `✅ 已录入: ${r.type === 'income' ? '收款' : '付款'} ${r.amount.toLocaleString()} ${r.currency}`;
+      if (r.customerCode) msg += ` 客户${r.customerCode}${!r.customerId ? '（已自动创建）' : ''}`;
+      if (r.accountName) msg += ` → ${r.accountName}`;
+      if (r.exchange_rate) msg += ` 汇率${r.exchange_rate}`;
+      message.success(msg);
       setQuickInputText('');
       setQuickResult(null);
       loadData();
@@ -481,7 +490,7 @@ export default function AdminRecords() {
           onChange={(e) => {
             setQuickInputText(e.target.value);
             if (e.target.value.trim()) {
-              const result = parseQuickInput(e.target.value, allAccounts, currencyAliases, allCustomers, users[0]?.id || '');
+              const result = parseQuickInput(e.target.value, allAccounts, currencyAliases, allCustomers, users[0]?.id || '', salespersons[0]?.id || '');
               setQuickResult(result);
             } else {
               setQuickResult(null);
@@ -665,14 +674,6 @@ export default function AdminRecords() {
                         value={editingRow.business_type || undefined}
                         onChange={(v) => setEditingRow({ ...editingRow, business_type: v || '' })}
                         options={BUSINESS_TYPES.map(b => ({ label: b.label, value: b.value }))}
-                        allowClear
-                      />
-                    </Form.Item>
-                    <Form.Item label="汇率方向">
-                      <Select
-                        value={editingRow.rate_direction || undefined}
-                        onChange={(v) => setEditingRow({ ...editingRow, rate_direction: v || '' })}
-                        options={RATE_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))}
                         allowClear
                       />
                     </Form.Item>
@@ -925,28 +926,14 @@ export default function AdminRecords() {
                       allowClear
                     />
                   </Form.Item>
-                  {(newRecord.type === 'exchange' || newRecord.type === 'income' || newRecord.type === 'expense') && (
-                    <Form.Item label="汇率方向">
-                      <Select
-                        value={newRecord.rate_direction || undefined}
-                        onChange={(v) => setNewRecord({ ...newRecord, rate_direction: v || 'divide' })}
-                        options={RATE_DIRECTIONS.map(d => ({ label: d.label, value: d.value }))}
-                      />
-                    </Form.Item>
-                  )}
-                  {newRecord.customer_id && newRecord.rate_direction && newRecord.exchange_rate && (newRecord.amount || newRecord.from_amount) && (
+                  {newRecord.customer_id && newRecord.exchange_rate && (newRecord.amount || newRecord.from_amount) && (
                     <Form.Item label="理论成本（自动）">
                       <Input
                         value={
                           (() => {
                             const amt = parseFloat(newRecord.amount || newRecord.from_amount);
                             const rate = parseFloat(newRecord.exchange_rate);
-                            if (rate && amt) {
-                              const tc = newRecord.rate_direction === 'divide'
-                                ? (amt / rate).toFixed(4)
-                                : (amt * rate).toFixed(4);
-                              return `${tc} RMB`;
-                            }
+                            if (rate && amt) return `${(amt * rate).toFixed(4)} RMB`;
                             return '—';
                           })()
                         }

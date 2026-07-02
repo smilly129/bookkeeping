@@ -91,11 +91,14 @@ export default function AdminRecords() {
         base.customer_id = custId;
         base.business_type = r.business_type || null;
         base.purchase_id = r.purchase_id || null;
-        if (r.exchange_rate && (r.amount || r.from_amount)) {
-          const amt = parseFloat(r.amount || r.from_amount);
+        if (r.exchange_rate) {
           const rate = parseFloat(r.exchange_rate);
-          const cur = r.currency || r.from_currency || '';
-          if (rate && amt) base.theoretical_cost = calcTheoretical(amt, rate, cur);
+          base.exchange_rate = rate;
+          if ((r.amount || r.from_amount)) {
+            const amt = parseFloat(r.amount || r.from_amount);
+            const cur = r.currency || r.from_currency || '';
+            if (rate && amt) base.theoretical_cost = calcTheoretical(amt, rate, cur);
+          }
         }
       }
     }

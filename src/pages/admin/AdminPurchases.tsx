@@ -6,6 +6,79 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, ExportOutlined } from '@ant
 import { supabase, type Customer, type Salesperson, type PurchaseSummary, CURRENCIES, PURCHASE_STATUSES } from '../../lib/supabase';
 import dayjs from 'dayjs';
 
+// 采购单展开行：显示关联流水
+function LinkedTransactions({ purchaseId, customerId }: { purchaseId: string; customerId: string }) {
+  const [linked, setLinked] = useState<any[]>([]);
+  const [unlinked, setUnlinked] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadLinked();
+  }, [purchaseId]);
+
+  const loadLinked = async () => {
+    setLoading(true);
+    const [linkedRes, unlinkedRes] = await Promise.all([
+      supabase.from('transactions').select('id, transaction_date, currency, amount, theoretical_cost, type, notes').eq('purchase_id', purchaseId).eq('is_deleted', false).order('transaction_date', { ascending: false }),
+      supabase.from('transactions').select('id, transaction_date, currency, amount, theoretical_cost, type, notes').eq('customer_id', customerId).eq('business_type', 'purchase').eq('is_deleted', false).is('purchase_id', null).order('transaction_date', { ascending: false }),
+    ]);
+    if (linkedRes.data) setLinked(linkedRes.data);
+    if (unlinkedRes.data) setUnlinked(unlinkedRes.data);
+    setLoading(false);
+  };
+
+  const linkTx = async (txId: string) => {
+    await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', txId);
+    message.success('已关联');
+    loadLinked();
+  };
+
+  const unlinkTx = async (txId: string) => {
+    await supabase.from('transactions').update({ purchase_id: null }).eq('id', txId);
+    message.success('已取消关联');
+    loadLinked();
+  };
+
+  const txColumns = (showUnlink: boolean) => [
+    { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100 },
+    { title: '币种', dataIndex: 'currency', key: 'cur', width: 60 },
+    { title: '金额', dataIndex: 'amount', key: 'amt', width: 80, render: (v: number) => v?.toLocaleString() },
+    { title: '理论成本', dataIndex: 'theoretical_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
+    { title: '类型', dataIndex: 'type', key: 'type', width: 60, render: (t: string) => t === 'income' ? <Tag color="green">收</Tag> : <Tag color="red">付</Tag> },
+    { title: '备注', dataIndex: 'notes', key: 'notes', ellipsis: true },
+    ...(showUnlink ? [{
+      title: '操作', key: 'act', width: 80,
+      render: (_: any, r: any) => (
+        <Button size="small" danger onClick={() => unlinkTx(r.id)}>取消关联</Button>
+      ),
+    }] : [{
+      title: '操作', key: 'act', width: 60,
+      render: (_: any, r: any) => (
+        <Button size="small" type="primary" onClick={() => linkTx(r.id)}>关联</Button>
+      ),
+    }]),
+  ];
+
+  const linkedTotal = linked.reduce((s: number, t: any) => s + (t.theoretical_cost || t.amount || 0), 0);
+
+  return (
+    <div style={{ padding: '8px 24px' }}>
+      <div style={{ marginBottom: 8 }}>
+        <Tag color="blue">已关联 {linked.length} 笔，合计 {linkedTotal.toFixed(2)} RMB</Tag>
+      </div>
+      <Table columns={txColumns(true)} dataSource={linked} rowKey="id" size="small" loading={loading} pagination={false}
+        locale={{ emptyText: '暂无关联流水' }} style={{ marginBottom: 12 }} />
+
+      {unlinked.length > 0 && (
+        <>
+          <div style={{ marginBottom: 8, marginTop: 12, color: '#fa8c16', fontWeight: 600 }}>待关联流水（同客户）</div>
+          <Table columns={txColumns(false)} dataSource={unlinked} rowKey="id" size="small" loading={loading} pagination={false} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPurchases() {
   const [data, setData] = useState<PurchaseSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -125,14 +198,47 @@ export default function AdminPurchases() {
       notes: form.notes || null,
       user_id: (editingRow?.user_id) || (salespersons[0]?.id || ''),
     };
+    const quotedPrice = payload.quoted_price || 0;
+    let purchaseId = editingRow?.id || '';
+
     if (editingRow) {
       payload.updated_at = new Date().toISOString();
       await supabase.from('purchases').update(payload).eq('id', editingRow.id);
       message.success('已更新');
     } else {
-      await supabase.from('purchases').insert(payload);
+      const { data: inserted } = await supabase.from('purchases').insert(payload).select('id').single();
+      if (inserted) purchaseId = inserted.id;
       message.success('已添加');
     }
+
+    // 自动匹配：查找该客户未关联的采购流水
+    if (purchaseId && custId && quotedPrice > 0) {
+      const { data: matchTxs } = await supabase.from('transactions')
+        .select('id, theoretical_cost, amount, currency, type, exchange_rate')
+        .eq('customer_id', custId)
+        .eq('business_type', 'purchase')
+        .eq('is_deleted', false)
+        .is('purchase_id', null);
+
+      if (matchTxs && matchTxs.length > 0) {
+        // 累加理论成本
+        const totalCost = matchTxs.reduce((sum: number, t: any) => {
+          return sum + (t.theoretical_cost || t.amount || 0);
+        }, 0);
+
+        // 接近就自动关联（差异在10%以内或绝对差<50元）
+        const diff = Math.abs(totalCost - quotedPrice);
+        if (diff <= quotedPrice * 0.1 || diff < 50) {
+          for (const t of matchTxs) {
+            await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', t.id);
+          }
+          message.success(`已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）`);
+        } else if (totalCost > 0) {
+          message.warning(`找到 ${matchTxs.length} 笔未关联流水（合计${totalCost.toFixed(2)}元），与报价${quotedPrice}差异较大，请手动关联`);
+        }
+      }
+    }
+
     setModalOpen(false);
     loadData();
   };
@@ -262,6 +368,12 @@ export default function AdminPurchases() {
         scroll={{ x: 1100 }}
         pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 笔` }}
         size="small"
+        expandable={{
+          expandedRowRender: (record: PurchaseSummary) => (
+            <LinkedTransactions purchaseId={record.id} customerId={record.customer_id} />
+          ),
+          rowExpandable: () => true,
+        }}
       />
 
       {/* 采购流水（来自数据表格） */}

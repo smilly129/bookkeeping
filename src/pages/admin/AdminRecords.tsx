@@ -819,7 +819,7 @@ export default function AdminRecords() {
                 </Form.Item>
               </Space>
               <Form.Item label="汇率">
-                <Input type="number" value={newRecord.exchange_rate} onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })} />
+                <Input value={newRecord.exchange_rate} onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })} placeholder="汇率" />
               </Form.Item>
             </>
           )}
@@ -883,7 +883,7 @@ export default function AdminRecords() {
                         }} />
                       </Form.Item>
                       <Form.Item label={`汇率 (${fromAcc.currency}→${toAcc.currency})`}>
-                        <Input type="number" value={newRecord.exchange_rate} onChange={(e) => {
+                        <Input value={newRecord.exchange_rate} onChange={(e) => {
                           const er = parseFloat(e.target.value) || 0;
                           const fa = parseFloat(newRecord.from_amount) || 0;
                           setNewRecord({ ...newRecord, exchange_rate: e.target.value, to_amount: fa && er ? String((fa * er).toFixed(2)) : newRecord.to_amount });

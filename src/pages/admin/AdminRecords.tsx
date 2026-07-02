@@ -25,6 +25,29 @@ interface TxRow extends Transaction {
   salesperson_name?: string;
 }
 
+// 从备注提取客户代号和业务类型
+function extractBizFromNotes(notes: string, allCustomers: Customer[]) {
+  const result: { customer_code?: string; customer_id?: string; business_type?: string } = {};
+  if (!notes?.trim()) return result;
+  const n = notes.trim();
+
+  // 提取客户代号（大写字母+数字的组合，如BF9009, ZY6653）
+  const codeMatch = n.match(/[A-Z]{2,}\d+/);
+  if (codeMatch) {
+    const code = codeMatch[0].toUpperCase();
+    result.customer_code = code;
+    const found = allCustomers.find(c => c.code.toUpperCase() === code);
+    if (found) result.customer_id = found.id;
+  }
+
+  // 提取业务类型
+  if (/采购|回款|补款/.test(n)) result.business_type = 'purchase';
+  else if (/换汇/.test(n)) result.business_type = 'exchange';
+  else if (/客户/.test(n)) result.business_type = 'other';
+
+  return result;
+}
+
 export default function AdminRecords() {
   const [data, setData] = useState<TxRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -720,7 +743,18 @@ export default function AdminRecords() {
               <Input.TextArea value={editingRow.notes || ''} onChange={(e) => setEditingRow({ ...editingRow, notes: e.target.value })} rows={2} />
             </Form.Item>
             <div style={{ marginTop: 12, padding: '8px 0', borderTop: '1px dashed #d9d9d9' }}>
-              <div style={{ fontSize: 13, color: '#1677ff', marginBottom: 8 }}>业务信息</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: '#1677ff' }}>业务信息</span>
+                <Button size="small" type="link" onClick={() => {
+                  const extracted = extractBizFromNotes(editingRow?.notes || '', allCustomers);
+                  if (extracted.customer_code) {
+                    setEditingRow({ ...editingRow!, ...extracted });
+                    message.success(`已提取: ${extracted.customer_code} ${extracted.business_type || ''}`);
+                  } else {
+                    message.warning('备注中未识别到客户代号');
+                  }
+                }}>📋 从备注提取</Button>
+              </div>
               <Form.Item label="客户代号">
                 <Input
                   value={editingRow.customer_code || ''}
@@ -934,6 +968,18 @@ export default function AdminRecords() {
               label: <span style={{ fontSize: 13, color: '#1677ff' }}>▶ 业务信息</span>,
               children: (
                 <div style={{ padding: '8px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <Button size="small" type="link" onClick={() => {
+                      const extracted = extractBizFromNotes(newRecord.notes, allCustomers);
+                      if (extracted.customer_code) {
+                        const custId = extracted.customer_id || '';
+                        setNewRecord({ ...newRecord, customer_code: extracted.customer_code, customer_id: custId, business_type: extracted.business_type || newRecord.business_type });
+                        message.success(`已提取: ${extracted.customer_code} ${extracted.business_type || ''}`);
+                      } else {
+                        message.warning('备注中未识别到客户代号');
+                      }
+                    }}>📋 从备注提取</Button>
+                  </div>
                   <Form.Item label="业务员">
                     <Select
                       value={newRecord.user_id || undefined}

@@ -23,7 +23,7 @@ export default function AdminPurchases() {
   // 弹窗
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<PurchaseSummary | null>(null);
-  const [form, setForm] = useState({ customer_id: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+  const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
 
   useEffect(() => {
     loadLookups();
@@ -57,7 +57,7 @@ export default function AdminPurchases() {
 
   const openAdd = () => {
     setEditingRow(null);
-    setForm({ customer_id: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+    setForm({ customer_id: '', customer_code: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
     setModalOpen(true);
   };
 
@@ -65,6 +65,7 @@ export default function AdminPurchases() {
     setEditingRow(r);
     setForm({
       customer_id: r.customer_id,
+      customer_code: r.customer_code || '',
       currency: r.currency,
       quoted_price: r.quoted_price != null ? String(r.quoted_price) : '',
       actual_cost: r.actual_cost != null ? String(r.actual_cost) : '',
@@ -75,17 +76,44 @@ export default function AdminPurchases() {
   };
 
   const save = async () => {
-    if (!form.customer_id) { message.error('请选择客户'); return; }
+    const code = form.customer_code.trim().toUpperCase();
+    if (!code) { message.error('请输入客户代号'); return; }
     if (!form.currency) { message.error('请选择币种'); return; }
-    const cust = customers.find(c => c.id === form.customer_id);
-    const payload = {
-      customer_id: form.customer_id,
-      salesperson_id: cust?.salesperson_id || '',
+
+    // 查找或自动创建客户
+    let custId = form.customer_id;
+    const found = customers.find(c => c.code.toUpperCase() === code);
+    if (found) {
+      custId = found.id;
+    }
+    if (!custId || custId !== found?.id) {
+      if (!found) {
+        // 自动创建
+        const spId = salespersons[0]?.id || '';
+        const { data: newCust } = await supabase.from('customers').insert({
+          code,
+          salesperson_id: spId || null,
+        }).select('id').single();
+        if (newCust) {
+          custId = newCust.id;
+          // 刷新客户列表
+          loadLookups();
+        }
+      } else {
+        custId = found.id;
+      }
+    }
+
+    const cust = customers.find(c => c.id === custId) || found;
+    const payload: any = {
+      customer_id: custId,
+      salesperson_id: cust?.salesperson_id || salespersons[0]?.id || '',
       currency: form.currency,
       quoted_price: form.quoted_price ? parseFloat(form.quoted_price) : null,
       actual_cost: form.actual_cost ? parseFloat(form.actual_cost) : null,
       status: form.status,
       notes: form.notes || null,
+    };
       user_id: (editingRow?.user_id) || (salespersons[0]?.id || ''),
     };
     if (editingRow) {
@@ -237,18 +265,23 @@ export default function AdminPurchases() {
         width={500}
       >
         <Form layout="vertical">
-          <Form.Item label="客户" required>
-            <Select
-              value={form.customer_id || undefined}
-              onChange={(v) => setForm({ ...form, customer_id: v || '' })}
-              options={customers.map(c => ({
-                label: `${c.code} (${salespersons.find(s => s.id === c.salesperson_id)?.name || '—'})`,
-                value: c.id,
-              }))}
-              placeholder="选择客户"
-              showSearch
-              filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
+          <Form.Item label="客户代号" required>
+            <Input
+              value={form.customer_code}
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase();
+                const found = customers.find(c => c.code.toUpperCase() === code);
+                setForm({ ...form, customer_code: e.target.value, customer_id: found?.id || '' });
+              }}
+              placeholder="直接输入客户代号"
+              style={{ fontFamily: 'monospace' }}
             />
+            {form.customer_code && !customers.find(c => c.code.toUpperCase() === form.customer_code.toUpperCase()) && (
+              <div style={{ fontSize: 11, color: '#fa8c16', marginTop: 2 }}>新客户，保存时自动创建</div>
+            )}
+            {form.customer_code && customers.find(c => c.code.toUpperCase() === form.customer_code.toUpperCase()) && (
+              <div style={{ fontSize: 11, color: '#52c41a', marginTop: 2 }}>✅ 已匹配</div>
+            )}
           </Form.Item>
           <Form.Item label="币种" required>
             <Select

@@ -129,8 +129,7 @@ export default function AdminPurchases() {
 
     // 加载采购流水（数据表格中标记为采购的 transactions）
     let txQuery = supabase.from('transactions').select(`
-      id, transaction_date, customer_id, currency, amount, notes, type, direction,
-      customer:customer_id(code)
+      id, transaction_date, customer_id, currency, amount, notes, type
     `).eq('business_type', 'purchase').eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
     if (filterCust) txQuery = txQuery.eq('customer_id', filterCust);
     const { data: txs } = await txQuery;
@@ -383,7 +382,10 @@ export default function AdminPurchases() {
           { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100 },
           {
             title: '客户', dataIndex: 'customer_id', key: 'cust', width: 100,
-            render: (_: any, r: any) => r.customer?.code ? <Tag color="blue">{r.customer.code}</Tag> : '—',
+            render: (_: any, r: any) => {
+              const c = customers.find(x => x.id === r.customer_id);
+              return c ? <Tag color="blue">{c.code}</Tag> : '—';
+            },
           },
           { title: '币种', dataIndex: 'currency', key: 'cur', width: 60 },
           {

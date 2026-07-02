@@ -35,6 +35,7 @@ export default function AdminRecords() {
     notes: '',
     // 业务字段
     customer_id: '', business_type: '', purchase_id: '',
+    customer_code: '',  // 直接输入的客户代号
   });
   const [addAccounts, setAddAccounts] = useState<Account[]>([]);
 
@@ -57,15 +58,36 @@ export default function AdminRecords() {
       notes: r.notes || null,
     };
     // 业务字段（可选）
-    if (r.customer_id) {
-      base.customer_id = r.customer_id;
-      base.business_type = r.business_type || null;
-      base.purchase_id = r.purchase_id || null;
-      // 理论成本 = 金额 × 汇率（汇率=1外币=?RMB）
-      if (r.exchange_rate && (r.amount || r.from_amount)) {
-        const amt = parseFloat(r.amount || r.from_amount);
-        const rate = parseFloat(r.exchange_rate);
-        if (rate && amt) base.theoretical_cost = +(amt * rate).toFixed(4);
+    const custCode = r.customer_code?.trim().toUpperCase();
+    if (custCode) {
+      // 查找或自动创建客户
+      let custId = r.customer_id;
+      if (!custId) {
+        const found = allCustomers.find(c => c.code.toUpperCase() === custCode);
+        if (found) {
+          custId = found.id;
+        } else {
+          const { data: newCust } = await supabase.from('customers').insert({
+            code: custCode,
+            salesperson_id: r.user_id || null,
+          }).select('id').single();
+          if (newCust) {
+            custId = newCust.id;
+            supabase.from('customers').select('*').order('code').then(({ data: d }) => {
+              if (d) setAllCustomers(d as any);
+            });
+          }
+        }
+      }
+      if (custId) {
+        base.customer_id = custId;
+        base.business_type = r.business_type || null;
+        base.purchase_id = r.purchase_id || null;
+        if (r.exchange_rate && (r.amount || r.from_amount)) {
+          const amt = parseFloat(r.amount || r.from_amount);
+          const rate = parseFloat(r.exchange_rate);
+          if (rate && amt) base.theoretical_cost = +(amt * rate).toFixed(4);
+        }
       }
     }
 
@@ -116,7 +138,7 @@ export default function AdminRecords() {
     if (error) { message.error('添加失败: ' + error.message); return; }
     message.success('已添加');
     setAddModalOpen(false);
-    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '', customer_id: '', business_type: '', purchase_id: '' });
+    setNewRecord({ user_id: '', type: 'expense', direction: '', currency: '', amount: '', from_currency: '', to_currency: '', from_amount: '', to_amount: '', exchange_rate: '', from_account_id: '', to_account_id: '', transaction_date: dayjs(), notes: '', customer_id: '', business_type: '', purchase_id: '', customer_code: '' });
     loadData();
   };
 
@@ -656,17 +678,30 @@ export default function AdminRecords() {
                 children: (
                   <div style={{ padding: '8px 0' }}>
                     <Form.Item label="客户代号">
-                      <Select
-                        value={editingRow.customer_id || undefined}
-                        onChange={(v) => setEditingRow({ ...editingRow, customer_id: v || '' })}
-                        options={allCustomers.map(c => ({
-                          label: `${c.code}${editingRow.salesperson_name ? ` (${editingRow.salesperson_name})` : ''}`,
-                          value: c.id,
-                        }))}
-                        placeholder="选择客户"
-                        showSearch
-                        filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
-                        allowClear
+                      <Input
+                        value={editingRow.customer_code || ''}
+                        onChange={(e) => {
+                          const code = e.target.value.toUpperCase();
+                          const found = allCustomers.find(c => c.code.toUpperCase() === code);
+                          setEditingRow({ ...editingRow, customer_code: e.target.value, customer_id: found?.id || '' });
+                        }}
+                        placeholder="直接输入客户代号"
+                        style={{ fontFamily: 'monospace' }}
+                      />
+                    </Form.Item>
+                    <Form.Item label="汇率 (1外币=?RMB)">
+                      <Input
+                        value={editingRow.exchange_rate || ''}
+                        onChange={(e) => {
+                          const rate = parseFloat(e.target.value) || 0;
+                          const amt = editingRow.amount || editingRow.from_amount || 0;
+                          setEditingRow({
+                            ...editingRow,
+                            exchange_rate: rate || undefined as any,
+                            theoretical_cost: rate && amt ? +(amt * rate).toFixed(4) : undefined,
+                          });
+                        }}
+                        placeholder="如 0.08 (卢布), 6.65 (USDT)"
                       />
                     </Form.Item>
                     <Form.Item label="业务类型">
@@ -895,25 +930,35 @@ export default function AdminRecords() {
                     />
                   </Form.Item>
                   <Form.Item label="客户代号">
-                    <Select
-                      value={newRecord.customer_id || undefined}
-                      onChange={(v) => {
-                        const custId = v || '';
-                        const cust = allCustomers.find(c => c.id === custId);
+                    <Input
+                      value={newRecord.customer_code}
+                      onChange={(e) => {
+                        const code = e.target.value.toUpperCase();
+                        const found = allCustomers.find(c => c.code.toUpperCase() === code);
                         setNewRecord({
                           ...newRecord,
-                          customer_id: custId,
+                          customer_code: e.target.value,
+                          customer_id: found?.id || '',
                           purchase_id: '',
                         });
                       }}
-                      options={(custBySp.length > 0 ? custBySp : allCustomers).map(c => ({
-                        label: `${c.code}${salespersons.find(s => s.id === c.salesperson_id)?.name ? ` (${salespersons.find(s => s.id === c.salesperson_id)?.name})` : ''}`,
-                        value: c.id,
-                      }))}
-                      placeholder="选择客户"
-                      showSearch
-                      filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
-                      allowClear
+                      placeholder="直接输入客户代号，自动创建"
+                      style={{ fontFamily: 'monospace' }}
+                    />
+                    {newRecord.customer_code && !allCustomers.find(c => c.code.toUpperCase() === newRecord.customer_code.toUpperCase()) && (
+                      <div style={{ fontSize: 11, color: '#fa8c16', marginTop: 2 }}>新客户，保存时自动创建</div>
+                    )}
+                    {newRecord.customer_code && allCustomers.find(c => c.code.toUpperCase() === newRecord.customer_code.toUpperCase()) && (
+                      <div style={{ fontSize: 11, color: '#52c41a', marginTop: 2 }}>
+                        ✅ 已匹配: {allCustomers.find(c => c.code.toUpperCase() === newRecord.customer_code.toUpperCase())?.code}
+                      </div>
+                    )}
+                  </Form.Item>
+                  <Form.Item label="汇率 (1外币=?RMB)">
+                    <Input
+                      value={newRecord.exchange_rate}
+                      onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })}
+                      placeholder="如 0.08 (卢布), 6.65 (USDT)"
                     />
                   </Form.Item>
                   <Form.Item label="业务类型">
@@ -926,7 +971,7 @@ export default function AdminRecords() {
                       allowClear
                     />
                   </Form.Item>
-                  {newRecord.customer_id && newRecord.exchange_rate && (newRecord.amount || newRecord.from_amount) && (
+                  {newRecord.exchange_rate && (newRecord.amount || newRecord.from_amount) && (
                     <Form.Item label="理论成本（自动）">
                       <Input
                         value={

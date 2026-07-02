@@ -276,6 +276,39 @@ export default function AdminRecords() {
   // 编辑保存
   const handleSaveEdit = async () => {
     if (!editingRow) return;
+
+    // 客户代号处理：有输入就找或创建客户
+    const custCode = (editingRow as any).customer_code?.trim().toUpperCase() || '';
+    let custId = editingRow.customer_id || '';
+    if (custCode && !custId) {
+      // 先从缓存找
+      let found = allCustomers.find(c => c.code.toUpperCase() === custCode);
+      if (!found) {
+        // 从数据库查
+        const { data: dbCust } = await supabase.from('customers').select('id').eq('code', custCode).single();
+        if (dbCust) {
+          custId = dbCust.id;
+        } else {
+          // 自动创建
+          const spId = salespersons[0]?.id || '';
+          const { data: newCust } = await supabase.from('customers').insert({
+            code: custCode, salesperson_id: spId || null,
+          }).select('id').single();
+          if (newCust) custId = newCust.id;
+        }
+      } else {
+        custId = found.id;
+      }
+    }
+
+    // 计算理论成本
+    const rateVal = editingRow.exchange_rate
+      ? (typeof editingRow.exchange_rate === 'number' ? editingRow.exchange_rate : parseFloat(String(editingRow.exchange_rate)))
+      : 0;
+    const amtVal = editingRow.amount || editingRow.from_amount || 0;
+    const curVal = editingRow.currency || editingRow.from_currency || '';
+    const theoCost = (rateVal && amtVal) ? calcTheoretical(amtVal, rateVal, curVal) : null;
+
     const updateData: any = {
       type: editingRow.type,
       direction: editingRow.direction,
@@ -285,57 +318,26 @@ export default function AdminRecords() {
       to_currency: editingRow.to_currency,
       from_amount: editingRow.from_amount,
       to_amount: editingRow.to_amount,
-      exchange_rate: editingRow.exchange_rate,
+      exchange_rate: rateVal || editingRow.exchange_rate || null,
       from_account_id: editingRow.from_account_id,
       to_account_id: editingRow.to_account_id,
       notes: editingRow.notes,
       transaction_date: editingRow.transaction_date,
       updated_at: new Date().toISOString(),
+      // 业务字段（总是写入，不管之前有没有）
+      customer_id: custId || null,
+      business_type: editingRow.business_type || null,
+      purchase_id: editingRow.purchase_id || null,
+      theoretical_cost: theoCost,
+      rate_direction: null,
     };
-    // 客户代号处理
-    const custCode = (editingRow as any).customer_code?.trim().toUpperCase();
-    let custId = editingRow.customer_id || '';
-    if (custCode && !custId) {
-      // 自动创建新客户
-      const found = allCustomers.find(c => c.code.toUpperCase() === custCode);
-      if (found) {
-        custId = found.id;
-      } else {
-        const spId = salespersons[0]?.id || '';
-        const { data: newCust } = await supabase.from('customers').insert({
-          code: custCode,
-          salesperson_id: spId || null,
-        }).select('id').single();
-        if (newCust) custId = newCust.id;
-      }
-    }
 
-    if (custId) {
-      updateData.customer_id = custId;
-      updateData.business_type = editingRow.business_type || null;
-      updateData.purchase_id = editingRow.purchase_id || null;
-      if (editingRow.exchange_rate) {
-        const rate = typeof editingRow.exchange_rate === 'number' ? editingRow.exchange_rate : parseFloat(String(editingRow.exchange_rate));
-        if (rate) {
-          updateData.exchange_rate = rate;
-          const amt = editingRow.amount || editingRow.from_amount || 0;
-          const cur = editingRow.currency || editingRow.from_currency || '';
-          if (amt) updateData.theoretical_cost = calcTheoretical(amt, rate, cur);
-        }
-      }
-    } else {
-      updateData.customer_id = null;
-      updateData.business_type = null;
-      updateData.purchase_id = null;
-      updateData.theoretical_cost = null;
-      updateData.rate_direction = null;
-    }
     const { error } = await supabase.from('transactions').update(updateData).eq('id', editingRow.id);
 
     if (error) {
-      message.error('保存失败');
+      message.error('保存失败: ' + error.message);
     } else {
-      message.success('已保存');
+      message.success('已保存' + (custCode ? `（客户: ${custCode}）` : ''));
       setEditModalOpen(false);
       setEditingRow(null);
       loadData();

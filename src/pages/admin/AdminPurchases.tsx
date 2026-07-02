@@ -141,13 +141,17 @@ export default function AdminPurchases() {
 
     // 合并采购单 + 流水：一行 = 采购单 + 一笔关联流水
     const purchaseIds = (raw as PurchaseSummary[] || []).map(p => p.id);
-    const { data: allLinked } = await supabase.from('transactions')
-      .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id')
-      .in('purchase_id', purchaseIds).eq('is_deleted', false)
-      .order('transaction_date', { ascending: false });
+    let allLinked: any[] = [];
+    if (purchaseIds.length > 0) {
+      const { data } = await supabase.from('transactions')
+        .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id')
+        .in('purchase_id', purchaseIds).eq('is_deleted', false)
+        .order('transaction_date', { ascending: false });
+      allLinked = data || [];
+    }
 
     const linkedMap = new Map<string, any[]>();
-    allLinked?.forEach(t => {
+    allLinked.forEach(t => {
       if (!linkedMap.has(t.purchase_id)) linkedMap.set(t.purchase_id, []);
       linkedMap.get(t.purchase_id)!.push(t);
     });

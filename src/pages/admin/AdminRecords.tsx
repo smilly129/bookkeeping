@@ -332,12 +332,15 @@ export default function AdminRecords() {
       rate_direction: null,
     };
 
+    // 诊断：看看实际发送了什么
+    console.log('SAVE EDIT:', { id: editingRow.id, custCode, custId, business_type: editingRow.business_type, rateVal, updateData });
+
     const { error } = await supabase.from('transactions').update(updateData).eq('id', editingRow.id);
 
     if (error) {
       message.error('保存失败: ' + error.message);
     } else {
-      message.success('已保存' + (custCode ? `（客户: ${custCode}）` : ''));
+      message.success('已保存' + (custCode ? `（客户: ${custCode}, ${editingRow.business_type || '无类型'}）` : ''));
       setEditModalOpen(false);
       setEditingRow(null);
       loadData();

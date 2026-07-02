@@ -89,6 +89,7 @@ export default function AdminPurchases() {
   const [filterStatus, setFilterStatus] = useState('');
 
   // 基础数据
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [custBySp, setCustBySp] = useState<Customer[]>([]);
@@ -108,12 +109,14 @@ export default function AdminPurchases() {
   }, [filterSp, filterCust, filterStatus]);
 
   const loadLookups = async () => {
-    const [spRes, custRes] = await Promise.all([
+    const [spRes, custRes, userRes] = await Promise.all([
       supabase.from('salespersons').select('*').order('name'),
       supabase.from('customers').select('*').order('code'),
+      supabase.from('users').select('id, name'),
     ]);
     if (spRes.data) setSalespersons(spRes.data);
     if (custRes.data) setCustomers(custRes.data);
+    if (userRes.data) setUsers(userRes.data);
   };
 
   const loadData = async () => {
@@ -195,7 +198,7 @@ export default function AdminPurchases() {
       actual_cost: form.actual_cost ? parseFloat(form.actual_cost) : null,
       status: form.status,
       notes: form.notes || null,
-      user_id: (editingRow?.user_id) || (salespersons[0]?.id || ''),
+      user_id: users[0]?.id || '',
     };
     const quotedPrice = payload.quoted_price || 0;
     let purchaseId = editingRow?.id || '';
@@ -205,7 +208,8 @@ export default function AdminPurchases() {
       await supabase.from('purchases').update(payload).eq('id', editingRow.id);
       message.success('已更新');
     } else {
-      const { data: inserted } = await supabase.from('purchases').insert(payload).select('id').single();
+      const { data: inserted, error: insertErr } = await supabase.from('purchases').insert(payload).select('id').single();
+      if (insertErr) { message.error('添加失败: ' + insertErr.message); setModalOpen(false); return; }
       if (inserted) purchaseId = inserted.id;
       message.success('已添加');
     }

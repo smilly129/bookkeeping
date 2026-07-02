@@ -129,8 +129,8 @@ export default function AdminPurchases() {
 
     // 加载采购流水（数据表格中标记为采购的 transactions）
     let txQuery = supabase.from('transactions').select(`
-      id, transaction_date, customer_id, currency, amount, notes, type
-    `).eq('business_type', 'purchase').eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
+      id, transaction_date, customer_id, currency, amount, notes, type, theoretical_cost, business_type, purchase_id
+    `).or('business_type.eq.purchase,business_type.eq.exchange').eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
     if (filterCust) txQuery = txQuery.eq('customer_id', filterCust);
     const { data: txs } = await txQuery;
     if (txs) setPurchaseTxs(txs);
@@ -225,15 +225,18 @@ export default function AdminPurchases() {
           return sum + (t.theoretical_cost || t.amount || 0);
         }, 0);
 
-        // 接近就自动关联（差异在10%以内或绝对差<50元）
+        // 容差 ≤1元 自动关联
         const diff = Math.abs(totalCost - quotedPrice);
-        if (diff <= quotedPrice * 0.1 || diff < 50) {
+        if (diff <= 1) {
           for (const t of matchTxs) {
             await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', t.id);
           }
-          message.success(`已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）`);
-        } else if (totalCost > 0) {
-          message.warning(`找到 ${matchTxs.length} 笔未关联流水（合计${totalCost.toFixed(2)}元），与报价${quotedPrice}差异较大，请手动关联`);
+          const deposit = totalCost > quotedPrice ? `（客户多打 ${(totalCost - quotedPrice).toFixed(2)}元，记为存款）` : '';
+          message.success(`已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）${deposit}`);
+        } else if (totalCost > quotedPrice) {
+          message.info(`客户已打款${totalCost.toFixed(2)}元，超出报价${quotedPrice}共${diff.toFixed(2)}元，超出部分记为存款`);
+        } else if (totalCost < quotedPrice && totalCost > 0) {
+          message.warning(`⚠️ 客户仅打款${totalCost.toFixed(2)}元，距报价${quotedPrice}还差${diff.toFixed(2)}元，已标记待补款`);
         }
       }
     }
@@ -335,7 +338,7 @@ export default function AdminPurchases() {
       <Space wrap style={{ marginBottom: 16 }}>
         <Tag color="blue" style={{ padding: '4px 12px', fontSize: 14 }}>采购利润: {totalProfit >= 0 ? '+' : ''}{totalProfit.toLocaleString()}</Tag>
         <Tag color="red" style={{ padding: '4px 12px', fontSize: 14 }}>待补款 {pendingShortfall} 笔，共 {totalShortfall.toLocaleString()}</Tag>
-        <Tag style={{ padding: '4px 12px', fontSize: 14 }}>共 {data.length} 笔采购</Tag>
+        <Tag color="green" style={{ padding: '4px 12px', fontSize: 14 }}>已匹配 {data.filter(d => d.total_received > 0 && d.shortfall <= 1).length} 笔</Tag>
       </Space>
 
       {/* 筛选 */}
@@ -359,24 +362,55 @@ export default function AdminPurchases() {
         />
       </Space>
 
+      {/* 区域一：已匹配采购单 */}
+      <h3 style={{ marginBottom: 8, color: '#52c41a' }}>✅ 已匹配采购单</h3>
       <Table
         columns={columns}
-        dataSource={data}
+        dataSource={data.filter(d => d.total_received > 0 && d.shortfall <= 1)}
         rowKey="id"
         loading={loading}
         scroll={{ x: 1100 }}
-        pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 笔` }}
+        pagination={false}
         size="small"
+        style={{ marginBottom: 24 }}
         expandable={{
           expandedRowRender: (record: PurchaseSummary) => (
             <LinkedTransactions purchaseId={record.id} customerId={record.customer_id} />
           ),
           rowExpandable: () => true,
         }}
+        locale={{ emptyText: '暂无已匹配采购单' }}
       />
 
-      {/* 采购流水（来自数据表格） */}
-      <h3 style={{ margin: '24px 0 12px' }}>📋 采购流水（来自数据表格）</h3>
+      {/* 区域二：待补款采购单 */}
+      <h3 style={{ marginBottom: 8, color: '#ff4d4f' }}>🔴 待补款 / 未匹配采购单</h3>
+      <Table
+        columns={columns.map(c => c.key === 'shortfall' ? {
+          ...c,
+          render: (v: number, r: PurchaseSummary) => {
+            if (v > 1) return <Tag color="error">⚠️ 差 {v.toLocaleString()}</Tag>;
+            if (r.total_received === 0) return <Tag color="default">未打款</Tag>;
+            return <Tag color="success">✓ 已收齐</Tag>;
+          },
+        } : c)}
+        dataSource={data.filter(d => d.shortfall > 1 || d.total_received === 0)}
+        rowKey="id"
+        loading={loading}
+        scroll={{ x: 1100 }}
+        pagination={false}
+        size="small"
+        style={{ marginBottom: 24 }}
+        expandable={{
+          expandedRowRender: (record: PurchaseSummary) => (
+            <LinkedTransactions purchaseId={record.id} customerId={record.customer_id} />
+          ),
+          rowExpandable: () => true,
+        }}
+        locale={{ emptyText: '暂无待补款采购单' }}
+      />
+
+      {/* 区域三：未关联流水 */}
+      <h3 style={{ marginBottom: 8, color: '#1677ff' }}>📋 未关联流水（待匹配）</h3>
       <Table
         columns={[
           { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100 },
@@ -388,22 +422,24 @@ export default function AdminPurchases() {
             },
           },
           { title: '币种', dataIndex: 'currency', key: 'cur', width: 60 },
+          { title: '金额', dataIndex: 'amount', key: 'amt', width: 100, render: (v: number) => v?.toLocaleString() },
+          { title: '理论成本', dataIndex: 'theoretical_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
           {
-            title: '金额', dataIndex: 'amount', key: 'amt', width: 100,
-            render: (v: number) => v?.toLocaleString(),
-          },
-          {
-            title: '类型', dataIndex: 'type', key: 'type', width: 70,
-            render: (t: string) => t === 'income' ? <Tag color="green">收款</Tag> : <Tag color="red">付款</Tag>,
+            title: '业务类型', dataIndex: 'business_type', key: 'bt', width: 70,
+            render: (t: string) => t === 'purchase' ? <Tag color="purple">采购</Tag> : <Tag>{t || '—'}</Tag>,
           },
           { title: '备注', dataIndex: 'notes', key: 'notes', ellipsis: true, render: (v: string) => v || '—' },
         ]}
-        dataSource={purchaseTxs}
+        dataSource={(() => {
+          // 只显示未关联的（purchase_id 为 null 且有 business_type）
+          const unlinked = purchaseTxs.filter((t: any) => !t.purchase_id);
+          return unlinked;
+        })()}
         rowKey="id"
         loading={loading}
         pagination={false}
         size="small"
-        locale={{ emptyText: '暂无采购流水' }}
+        locale={{ emptyText: '暂无未关联流水' }}
       />
 
       {/* 新增/编辑弹窗 */}

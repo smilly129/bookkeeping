@@ -166,10 +166,10 @@ export default function AdminCustomerBalances() {
       render: (v: number) => v > 0 ? v.toLocaleString() : '—',
     },
     {
-      title: '可用余额', dataIndex: 'available_balance', key: 'bal', width: 110,
+      title: '存款/欠款', dataIndex: 'available_balance', key: 'bal', width: 110,
       render: (v: number) => (
         <span style={{ fontWeight: 600, color: v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : '#888' }}>
-          {v > 0 ? '+' : ''}{v.toLocaleString()}
+          {v > 0 ? `存款+${v.toLocaleString()}` : v < 0 ? `欠款${v.toLocaleString()}` : '0'}
         </span>
       ),
     },

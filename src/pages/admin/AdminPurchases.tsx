@@ -23,7 +23,7 @@ export default function AdminPurchases() {
   // 弹窗
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<PurchaseSummary | null>(null);
-  const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+  const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
 
   useEffect(() => {
     loadLookups();
@@ -57,7 +57,7 @@ export default function AdminPurchases() {
 
   const openAdd = () => {
     setEditingRow(null);
-    setForm({ customer_id: '', customer_code: '', currency: '', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+    setForm({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
     setModalOpen(true);
   };
 

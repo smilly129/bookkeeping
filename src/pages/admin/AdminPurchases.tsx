@@ -81,6 +81,7 @@ function LinkedTransactions({ purchaseId, customerId }: { purchaseId: string; cu
 
 export default function AdminPurchases() {
   const [data, setData] = useState<PurchaseSummary[]>([]);
+  const [combinedRows, setCombinedRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   // 筛选
@@ -137,6 +138,35 @@ export default function AdminPurchases() {
     if (filterCust) txQuery = txQuery.eq('customer_id', filterCust);
     const { data: txs } = await txQuery;
     if (txs) setPurchaseTxs(txs);
+
+    // 合并采购单 + 流水：一行 = 采购单 + 一笔关联流水
+    const purchaseIds = (raw as PurchaseSummary[] || []).map(p => p.id);
+    const { data: allLinked } = await supabase.from('transactions')
+      .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id')
+      .in('purchase_id', purchaseIds).eq('is_deleted', false)
+      .order('transaction_date', { ascending: false });
+
+    const linkedMap = new Map<string, any[]>();
+    allLinked?.forEach(t => {
+      if (!linkedMap.has(t.purchase_id)) linkedMap.set(t.purchase_id, []);
+      linkedMap.get(t.purchase_id)!.push(t);
+    });
+
+    const combined: any[] = [];
+    for (const p of (raw as PurchaseSummary[] || [])) {
+      const linked = linkedMap.get(p.id) || [];
+      if (linked.length > 0) {
+        for (const t of linked) {
+          combined.push({ ...p, tx_date: t.transaction_date, tx_currency: t.currency, tx_amount: t.amount, tx_rate: t.exchange_rate, tx_cost: t.theoretical_cost });
+        }
+      } else {
+        combined.push({ ...p, tx_date: '', tx_currency: '', tx_amount: null, tx_rate: null, tx_cost: null });
+      }
+    }
+    if (filterCust) setCombinedRows(combined.filter(r => r.customer_id === filterCust));
+    else if (filterSp) setCombinedRows(combined.filter(r => r.salesperson_id === filterSp));
+    else setCombinedRows(combined);
+
     setLoading(false);
   };
 
@@ -354,6 +384,38 @@ export default function AdminPurchases() {
         <Tag color="red" style={{ padding: '4px 12px', fontSize: 14 }}>待补款 {pendingShortfall} 笔，共 {totalShortfall.toLocaleString()}</Tag>
         <Tag color="green" style={{ padding: '4px 12px', fontSize: 14 }}>已匹配 {data.filter(d => d.total_received > 0 && d.shortfall <= 1).length} 笔</Tag>
       </Space>
+
+      {/* 总览表：客户代号 打款日期 币种 汇率 理论成本 报价 实际支出 */}
+      <h3 style={{ marginBottom: 8 }}>📊 采购总览</h3>
+      <Table
+        columns={[
+          { title: '客户代号', dataIndex: 'customer_code', key: 'c', width: 100, render: (c: string) => <Tag color="blue">{c}</Tag> },
+          { title: '打款日期', dataIndex: 'tx_date', key: 'd', width: 100, render: (v: string) => v || '—' },
+          { title: '币种', dataIndex: 'tx_currency', key: 'cur', width: 60, render: (v: string) => v || '—' },
+          { title: '金额', dataIndex: 'tx_amount', key: 'amt', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
+          { title: '汇率', dataIndex: 'tx_rate', key: 'rate', width: 70, render: (v: number) => v != null ? v : '—' },
+          { title: '理论成本', dataIndex: 'tx_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
+          { title: '报价', dataIndex: 'quoted_price', key: 'qp', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
+          { title: '实际支出', dataIndex: 'actual_cost', key: 'ac', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
+          { title: '利润', dataIndex: 'profit', key: 'pf', width: 80, render: (v: number) => v != null ? <span style={{ color: v >= 0 ? '#52c41a' : '#ff4d4f' }}>{v.toLocaleString()}</span> : '—' },
+          {
+            title: '状态', dataIndex: 'shortfall', key: 'st', width: 80,
+            render: (v: number, r: any) => {
+              if (r.tx_date && v <= 1) return <Tag color="green">已匹配</Tag>;
+              if (v > 1) return <Tag color="red">待补{v.toLocaleString()}</Tag>;
+              if (!r.tx_date) return <Tag>未打款</Tag>;
+              return <Tag>—</Tag>;
+            },
+          },
+        ]}
+        dataSource={combinedRows}
+        rowKey={(r, i) => `${r.id}-${i}`}
+        loading={loading}
+        scroll={{ x: 1000 }}
+        pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 条` }}
+        size="small"
+        style={{ marginBottom: 24 }}
+      />
 
       {/* 筛选 */}
       <Space wrap style={{ marginBottom: 16 }}>

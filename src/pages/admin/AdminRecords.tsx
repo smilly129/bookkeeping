@@ -31,8 +31,8 @@ function extractBizFromNotes(notes: string, allCustomers: Customer[]) {
   if (!notes?.trim()) return result;
   const n = notes.trim();
 
-  // 提取客户代号（大写字母+数字的组合，如BF9009, ZY6653）
-  const codeMatch = n.match(/[A-Z]{2,}\d+/);
+  // 提取客户代号（字母+数字组合，如BF9009, JY1906-37, lxd2852）
+  const codeMatch = n.match(/[A-Za-z]{2,}\d{2,}(-\d+)?/);
   if (codeMatch) {
     const code = codeMatch[0].toUpperCase();
     result.customer_code = code;

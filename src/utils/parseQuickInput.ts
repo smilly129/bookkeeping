@@ -135,7 +135,7 @@ export function parseQuickInput(
   if (!currencyCode) { currencyCode = 'RUB'; warnings.push('未识别币种，默认卢布(RUB)'); }
 
   // 5. 客户
-  const custMatch = t.match(/客户\s*(\S+)/);
+  const custMatch = t.match(/客户\s*([A-Za-z0-9-]+)/);
   if (custMatch) {
     customerCode = custMatch[1].toUpperCase();
     t = t.replace(custMatch[0], ' ');

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Table, Button, Select, Space, Tag, Modal, message,
+  Table, Button, Select, Space, Tag, Modal, Input, message,
 } from 'antd';
 import { ExportOutlined, SearchOutlined } from '@ant-design/icons';
 import { supabase, type Salesperson, type Customer, type PurchaseSummary } from '../../lib/supabase';

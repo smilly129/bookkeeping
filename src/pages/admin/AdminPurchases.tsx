@@ -290,17 +290,34 @@ export default function AdminPurchases() {
   };
 
   const handleExport = () => {
-    const headers = ['客户代号', '业务员', '币种', '报价', '实际支出', '已收款', '待补款', '利润', '状态', '备注'];
-    const rows = data.map(r => [
-      r.customer_code, r.salesperson_name, r.currency, r.quoted_price, r.actual_cost,
-      r.total_received, r.shortfall, r.profit,
-      r.status === 'in_progress' ? '进行中' : '已完成', r.notes || '',
+    const tHeaders = ['客户代号', '打款日期', '币种', '金额', '汇率', '理论成本', '报价', '实际支出', '利润', '状态'];
+    const tRows = combinedRows.map(r => [
+      r.customer_code, r.tx_date || '未打款', r.tx_currency || '', r.tx_amount || '',
+      r.tx_rate || '', r.tx_cost || '', r.quoted_price || '', r.actual_cost || '',
+      r.profit || '', r.tx_date && r.shortfall <= 1 ? '已匹配' : r.shortfall > 1 ? `待补${r.shortfall}` : '未打款',
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c ?? ''}"`).join(','))].join('\n');
+
+    // 未关联流水
+    const unlinked = purchaseTxs.filter((t: any) => !t.purchase_id);
+    const uHeaders = ['', '--- 未关联流水 ---', '', '', '', '', '', '', '', ''];
+    const uSubHeaders = ['客户', '日期', '币种', '金额', '理论成本', '业务类型', '备注', '', '', ''];
+    const uRows = unlinked.map((t: any) => {
+      const c = customers.find(x => x.id === t.customer_id);
+      return [c?.code || '', t.transaction_date, t.currency, t.amount, t.theoretical_cost || '', t.business_type || '', t.notes || '', '', '', ''];
+    });
+
+    const lines = [tHeaders, ...tRows.map(r => r.map(c => `"${c ?? ''}"`).join(','))];
+    if (uRows.length > 0) {
+      lines.push(uHeaders.map(c => `"${c ?? ''}"`).join(','));
+      lines.push(uSubHeaders.map(c => `"${c ?? ''}"`).join(','));
+      lines.push(...uRows.map(r => r.map(c => `"${c ?? ''}"`).join(',')));
+    }
+
+    const csv = lines.join('\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `采购管理_${dayjs().format('YYYYMMDD')}.csv`;
+    a.download = `采购总览_${dayjs().format('YYYYMMDD')}.csv`;
     a.click();
     message.success('导出成功');
   };

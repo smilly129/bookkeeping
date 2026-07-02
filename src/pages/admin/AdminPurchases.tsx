@@ -19,6 +19,7 @@ export default function AdminPurchases() {
   const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [custBySp, setCustBySp] = useState<Customer[]>([]);
+  const [purchaseTxs, setPurchaseTxs] = useState<any[]>([]);
 
   // 弹窗
   const [modalOpen, setModalOpen] = useState(false);
@@ -52,6 +53,15 @@ export default function AdminPurchases() {
       if (filterStatus) rows = rows.filter(r => r.status === filterStatus);
       setData(rows);
     }
+
+    // 加载采购流水（数据表格中标记为采购的 transactions）
+    let txQuery = supabase.from('transactions').select(`
+      id, transaction_date, customer_id, currency, amount, notes, type, direction,
+      customer:customer_id(code)
+    `).eq('business_type', 'purchase').eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
+    if (filterCust) txQuery = txQuery.eq('customer_id', filterCust);
+    const { data: txs } = await txQuery;
+    if (txs) setPurchaseTxs(txs);
     setLoading(false);
   };
 
@@ -252,6 +262,34 @@ export default function AdminPurchases() {
         scroll={{ x: 1100 }}
         pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 笔` }}
         size="small"
+      />
+
+      {/* 采购流水（来自数据表格） */}
+      <h3 style={{ margin: '24px 0 12px' }}>📋 采购流水（来自数据表格）</h3>
+      <Table
+        columns={[
+          { title: '日期', dataIndex: 'transaction_date', key: 'date', width: 100 },
+          {
+            title: '客户', dataIndex: 'customer_id', key: 'cust', width: 100,
+            render: (_: any, r: any) => r.customer?.code ? <Tag color="blue">{r.customer.code}</Tag> : '—',
+          },
+          { title: '币种', dataIndex: 'currency', key: 'cur', width: 60 },
+          {
+            title: '金额', dataIndex: 'amount', key: 'amt', width: 100,
+            render: (v: number) => v?.toLocaleString(),
+          },
+          {
+            title: '类型', dataIndex: 'type', key: 'type', width: 70,
+            render: (t: string) => t === 'income' ? <Tag color="green">收款</Tag> : <Tag color="red">付款</Tag>,
+          },
+          { title: '备注', dataIndex: 'notes', key: 'notes', ellipsis: true, render: (v: string) => v || '—' },
+        ]}
+        dataSource={purchaseTxs}
+        rowKey="id"
+        loading={loading}
+        pagination={false}
+        size="small"
+        locale={{ emptyText: '暂无采购流水' }}
       />
 
       {/* 新增/编辑弹窗 */}

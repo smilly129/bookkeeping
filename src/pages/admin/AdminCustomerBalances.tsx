@@ -207,19 +207,16 @@ export default function AdminCustomerBalances() {
         <Tag color={totalAvail >= 0 ? 'green' : 'red'} style={{ padding: '4px 12px', fontSize: 14 }}>可用余额: {totalAvail >= 0 ? '+' : ''}{totalAvail.toLocaleString()}</Tag>
       </Space>
 
-      {/* 筛选 */}
+      {/* 搜索 */}
       <Space wrap style={{ marginBottom: 16 }}>
-        <Select
-          placeholder="按业务员" allowClear style={{ width: 120 }}
-          value={filterSp || undefined} onChange={(v) => setFilterSp(v || '')}
-          options={salespersons.map(s => ({ label: s.name, value: s.id }))}
-        />
-        <Select
-          placeholder="搜索客户代号" allowClear style={{ width: 160 }}
-          value={filterCustSearch || undefined} onChange={(v) => setFilterCustSearch(v || '')}
-          showSearch
-          filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
-          options={customers.map(c => ({ label: c.code, value: c.code }))}
+        <Input.Search
+          placeholder="输入客户代号搜索"
+          value={filterCustSearch}
+          onChange={(e) => setFilterCustSearch(e.target.value)}
+          onSearch={(v) => setFilterCustSearch(v.trim().toUpperCase())}
+          style={{ width: 220 }}
+          enterButton={<SearchOutlined />}
+          allowClear
         />
       </Space>
 

@@ -184,7 +184,7 @@ export default function AdminRecords() {
       *,
       from_acc:from_account_id(name),
       to_acc:to_account_id(name),
-      customer:customer_id(code, salesperson_id, salesperson:salesperson_id(name))
+      customer:customer_id(code, salesperson_id)
     `).eq('is_deleted', false)
       .gte('transaction_date', filterDateRange[0].format('YYYY-MM-DD'))
       .lte('transaction_date', filterDateRange[1].format('YYYY-MM-DD'))
@@ -213,7 +213,12 @@ export default function AdminRecords() {
         from_account_name: (t as any).from_acc?.name,
         to_account_name: (t as any).to_acc?.name,
         customer_code: (t as any).customer?.code || '',
-        salesperson_name: (t as any).customer?.salesperson?.name || '',
+        salesperson_name: (() => {
+          const custId = (t as any).customer?.salesperson_id;
+          if (!custId) return '';
+          const sp = salespersons.find(s => s.id === custId);
+          return sp?.name || '';
+        })(),
       }));
 
       // 疑似重复检测：同用户 + 同日期 + 同类型 + 同金额

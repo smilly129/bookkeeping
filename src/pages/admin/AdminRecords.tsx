@@ -700,21 +700,10 @@ export default function AdminRecords() {
                       />
                     </Form.Item>
                     <Form.Item label="汇率">
-                      <InputNumber
-                        value={editingRow.exchange_rate || undefined}
-                        onChange={(v) => {
-                          const rate = v || 0;
-                          const amt = editingRow.amount || editingRow.from_amount || 0;
-                          const cur = editingRow.currency || editingRow.from_currency || '';
-                          setEditingRow({
-                            ...editingRow,
-                            exchange_rate: rate || undefined as any,
-                            theoretical_cost: rate && amt ? calcTheoretical(amt, rate, cur) : undefined,
-                          });
-                        }}
+                      <Input
+                        value={editingRow.exchange_rate || ''}
+                        onChange={(e) => setEditingRow({ ...editingRow, exchange_rate: e.target.value || undefined as any })}
                         placeholder="卢布12.5 / USDT 6.65"
-                        style={{ width: '100%' }}
-                        stringMode
                       />
                     </Form.Item>
                     <Form.Item label="业务类型">
@@ -968,12 +957,10 @@ export default function AdminRecords() {
                     )}
                   </Form.Item>
                   <Form.Item label="汇率">
-                    <InputNumber
-                      value={newRecord.exchange_rate ? parseFloat(newRecord.exchange_rate) : undefined}
-                      onChange={(v) => setNewRecord({ ...newRecord, exchange_rate: v != null ? String(v) : '' })}
+                    <Input
+                      value={newRecord.exchange_rate}
+                      onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })}
                       placeholder="卢布12.5 / USDT 6.65"
-                      style={{ width: '100%' }}
-                      stringMode
                     />
                   </Form.Item>
                   <Form.Item label="业务类型">

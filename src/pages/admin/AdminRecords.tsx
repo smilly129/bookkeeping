@@ -883,7 +883,7 @@ export default function AdminRecords() {
                         const spId = v || '';
                         setNewRecord({ ...newRecord, user_id: spId, customer_id: '', purchase_id: '' });
                         if (spId) {
-                          supabase.from('customers').select('*, salesperson: salesperson_id(name)')
+                          supabase.from('customers').select('*')
                             .eq('salesperson_id', spId).order('code')
                             .then(({ data }) => { if (data) setCustBySp(data as any); });
                         } else { setCustBySp([]); }
@@ -906,7 +906,7 @@ export default function AdminRecords() {
                         });
                       }}
                       options={(custBySp.length > 0 ? custBySp : allCustomers).map(c => ({
-                        label: `${c.code}${(c as any).salesperson?.name ? ` (${(c as any).salesperson.name})` : ''}`,
+                        label: `${c.code}${salespersons.find(s => s.id === c.salesperson_id)?.name ? ` (${salespersons.find(s => s.id === c.salesperson_id)?.name})` : ''}`,
                         value: c.id,
                       }))}
                       placeholder="选择客户"

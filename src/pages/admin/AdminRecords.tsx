@@ -4,8 +4,9 @@ import {
   Form, InputNumber, message, Popconfirm, Image, Collapse,
 } from 'antd';
 import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined, DownOutlined } from '@ant-design/icons';
-import { supabase, type Transaction, type Account, type Customer, type Salesperson, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS, BUSINESS_TYPES, RATE_DIRECTIONS } from '../../lib/supabase';
+import { supabase, type Transaction, type Account, type Customer, type Salesperson, type CurrencyAlias, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS, BUSINESS_TYPES, RATE_DIRECTIONS } from '../../lib/supabase';
 import dayjs from 'dayjs';
+import { parseQuickInput } from '../../utils/parseQuickInput';
 
 interface TxRow extends Transaction {
   user_name?: string;
@@ -142,6 +143,12 @@ export default function AdminRecords() {
   const [custBySp, setCustBySp] = useState<Customer[]>([]); // 按业务员筛选的客户
   const [allPurchases, setAllPurchases] = useState<{ id: string; customer_id: string; quoted_price: number; }[]>([]);
 
+  // 快速录入
+  const [quickInputText, setQuickInputText] = useState('');
+  const [quickResult, setQuickResult] = useState<ReturnType<typeof parseQuickInput> | null>(null);
+  const [quickLoading, setQuickLoading] = useState(false);
+  const [currencyAliases, setCurrencyAliases] = useState<Record<string, string>>({});
+
   // 加载用户和账户列表 + 业务模块数据
   useEffect(() => {
     supabase.from('users').select('id, name').then(({ data }) => {
@@ -159,6 +166,14 @@ export default function AdminRecords() {
     });
     supabase.from('purchases').select('id, customer_id, quoted_price').eq('status', 'in_progress').then(({ data }) => {
       if (data) setAllPurchases(data);
+    });
+    // 加载币种别名
+    supabase.from('currency_aliases').select('*').then(({ data }) => {
+      if (data) {
+        const map: Record<string, string> = {};
+        (data as CurrencyAlias[]).forEach(a => { map[a.alias] = a.currency; });
+        setCurrencyAliases(map);
+      }
     });
   }, []);
 
@@ -309,6 +324,64 @@ export default function AdminRecords() {
     message.success('导出成功');
   };
 
+  // 快速录入：解析文本
+  const handleQuickParse = () => {
+    if (!quickInputText.trim()) return;
+    const result = parseQuickInput(
+      quickInputText,
+      allAccounts,
+      currencyAliases,
+      allCustomers,
+      users[0]?.id || '',
+    );
+    setQuickResult(result);
+  };
+
+  // 快速录入：一键创建
+  const handleQuickCreate = async () => {
+    if (!quickResult) return;
+    const r = quickResult;
+    if (!r.amount) { message.error('未识别到金额'); return; }
+    if (!users[0]) { message.error('没有可用的记账人'); return; }
+
+    setQuickLoading(true);
+    const base: any = {
+      user_id: users[0].id,
+      type: r.type,
+      transaction_date: r.transaction_date,
+      currency: r.currency,
+      amount: r.amount,
+      notes: r.notes || null,
+    };
+
+    // 方向
+    if (r.type === 'expense') {
+      base.direction = 'international';
+      base.from_account_id = r.accountId || null;
+    } else {
+      base.direction = 'international';
+      base.to_account_id = r.accountId || null;
+    }
+
+    // 业务字段
+    if (r.customerId) {
+      base.customer_id = r.customerId;
+      base.business_type = 'other';
+    }
+
+    const { error } = await supabase.from('transactions').insert(base);
+    setQuickLoading(false);
+
+    if (error) {
+      message.error('录入失败: ' + error.message);
+    } else {
+      message.success(`✅ 已录入: ${r.type === 'income' ? '收款' : '付款'} ${r.amount.toLocaleString()} ${r.currency}${r.customerCode ? ` 客户${r.customerCode}` : ''}${r.accountName ? ` → ${r.accountName}` : ''}`);
+      setQuickInputText('');
+      setQuickResult(null);
+      loadData();
+    }
+  };
+
   const typeOptions = [
     { value: 'expense', label: '💸 付款' },
     { value: 'income', label: '💰 收款' },
@@ -392,6 +465,75 @@ export default function AdminRecords() {
           }}>新增记录</Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
         </Space>
+      </div>
+
+      {/* 快速录入区 */}
+      <div style={{
+        marginBottom: 16, padding: 12, background: '#fafafa', borderRadius: 8,
+        border: '1px solid #f0f0f0',
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#555' }}>💬 快速录入收款/付款</div>
+        <textarea
+          value={quickInputText}
+          onChange={(e) => {
+            setQuickInputText(e.target.value);
+            if (e.target.value.trim()) {
+              const result = parseQuickInput(e.target.value, allAccounts, currencyAliases, allCustomers, users[0]?.id || '');
+              setQuickResult(result);
+            } else {
+              setQuickResult(null);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              if (quickResult && quickResult.amount) handleQuickCreate();
+            }
+          }}
+          placeholder={'例: 6月24日收5000卢布 t卡 客户alex回款\n     付2000美金 国外美元 客户bob\n     -3000卢布 t卡'}
+          rows={2}
+          style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #d9d9d9', fontFamily: 'inherit', fontSize: 14, resize: 'vertical' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', gap: 8 }}>
+          {/* 解析预览 */}
+          {quickResult && quickInputText.trim() && (
+            <div style={{ fontSize: 13, color: '#555', flex: 1 }}>
+              <span>📅 {quickResult.transaction_date}</span>
+              <span style={{ marginLeft: 12, color: quickResult.type === 'income' ? '#52c41a' : '#ff4d4f' }}>
+                {quickResult.type === 'income' ? '💰收款' : '💸付款'}
+              </span>
+              {quickResult.amount > 0 && (
+                <span style={{ marginLeft: 12, fontWeight: 600 }}>{quickResult.amount.toLocaleString()} {quickResult.currency}</span>
+              )}
+              {quickResult.accountName && (
+                <span style={{ marginLeft: 12 }}>🏦 {quickResult.accountName}</span>
+              )}
+              {quickResult.customerCode && (
+                <span style={{ marginLeft: 12, color: '#1677ff' }}>👤 {quickResult.customerCode}</span>
+              )}
+              {quickResult.notes && (
+                <span style={{ marginLeft: 12, color: '#888' }}>📝 {quickResult.notes}</span>
+              )}
+              {quickResult.warnings.length > 0 && (
+                <span style={{ marginLeft: 12, color: '#fa8c16' }}>⚠️ {quickResult.warnings.join(', ')}</span>
+              )}
+            </div>
+          )}
+          <Space>
+            <Button size="small" onClick={() => { setQuickInputText(''); setQuickResult(null); }}>清空</Button>
+            <Button
+              size="small" type="primary"
+              loading={quickLoading}
+              disabled={!quickResult || !quickResult.amount}
+              onClick={handleQuickCreate}
+            >
+              一键录入
+            </Button>
+          </Space>
+        </div>
+        <div style={{ fontSize: 11, color: '#bbb', marginTop: 4 }}>
+          输入格式: [日期] [收/付] [金额] [币种] [账户] 客户[代号] [备注]。无日期=当天，无币种=卢布，无标记=收款。Enter直接提交。
+        </div>
       </div>
 
       {/* 筛选栏 */}

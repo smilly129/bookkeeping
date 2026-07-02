@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Table, Card, Statistic, Row, Col, Button, Modal, Form, Input, Select, InputNumber, message, Popconfirm, Space } from 'antd';
+import { Table, Card, Statistic, Row, Col, Button, Modal, Form, Input, Select, InputNumber, message, Popconfirm, Space, Collapse, Tag } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, ExportOutlined } from '@ant-design/icons';
-import { supabase, type AccountBalance, type Account, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
+import { supabase, type AccountBalance, type Account, type CurrencyAlias, ACCOUNT_TYPES, CURRENCIES } from '../../lib/supabase';
 
 interface AccountRow extends AccountBalance {
   user_name?: string;
@@ -12,6 +12,10 @@ export default function AdminAccounts() {
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterUser, setFilterUser] = useState<string | undefined>();
+
+  // 币种别名管理
+  const [aliases, setAliases] = useState<CurrencyAlias[]>([]);
+  const [newAlias, setNewAlias] = useState({ alias: '', currency: '' });
 
   // 新增账户
   const [addOpen, setAddOpen] = useState(false);
@@ -67,7 +71,28 @@ export default function AdminAccounts() {
       if (u) setUsers(u);
     });
     loadBalances();
+    loadAliases();
   }, []);
+
+  const loadAliases = async () => {
+    const { data } = await supabase.from('currency_aliases').select('*').order('created_at', { ascending: false });
+    if (data) setAliases(data as CurrencyAlias[]);
+  };
+
+  const addAlias = async () => {
+    if (!newAlias.alias.trim() || !newAlias.currency) { message.error('请填写别名和币种'); return; }
+    const { error } = await supabase.from('currency_aliases').insert({ alias: newAlias.alias.trim(), currency: newAlias.currency });
+    if (error) { message.error('添加失败: ' + error.message); return; }
+    message.success('别名已添加');
+    setNewAlias({ alias: '', currency: '' });
+    loadAliases();
+  };
+
+  const deleteAlias = async (id: string) => {
+    await supabase.from('currency_aliases').delete().eq('id', id);
+    message.success('已删除');
+    loadAliases();
+  };
 
   const loadBalances = async () => {
     setLoading(true);
@@ -190,6 +215,61 @@ export default function AdminAccounts() {
         ))}
       </Row>
       <Table columns={columns} dataSource={filteredData} rowKey="account_id" loading={loading} size="small" pagination={{ pageSize: 50 }} scroll={{ x: 900 }} />
+
+      {/* 币种别名管理 */}
+      <Collapse ghost style={{ marginTop: 24 }} items={[{
+        key: 'alias',
+        label: <span style={{ color: '#1677ff' }}>🏷️ 币种别名管理（用于快速录入）</span>,
+        children: (
+          <div>
+            {/* 内置映射 */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>内置别名</div>
+              <Space wrap>
+                {['卢布/卢→RUB', '美金/美元→USD', '欧元→EUR', 'USDT/U→USDT', '人民币/元→RMB', '英镑→GBP', '日元→JPY', '韩元→KRW'].map(m => (
+                  <Tag key={m} style={{ marginBottom: 4 }}>{m}</Tag>
+                ))}
+              </Space>
+            </div>
+
+            {/* 自定义别名 */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>自定义别名</div>
+              {aliases.length === 0 ? (
+                <div style={{ color: '#999', fontSize: 13, marginBottom: 8 }}>暂无自定义别名</div>
+              ) : (
+                <Space wrap style={{ marginBottom: 8 }}>
+                  {aliases.map(a => (
+                    <Tag key={a.id} closable onClose={() => deleteAlias(a.id)} color="blue">
+                      {a.alias} → {a.currency}
+                    </Tag>
+                  ))}
+                </Space>
+              )}
+            </div>
+
+            {/* 新增别名 */}
+            <Space>
+              <Input
+                size="small"
+                placeholder="别名（如 U, 刀）"
+                value={newAlias.alias}
+                onChange={(e) => setNewAlias({ ...newAlias, alias: e.target.value })}
+                style={{ width: 140 }}
+              />
+              <Select
+                size="small"
+                placeholder="对应币种"
+                value={newAlias.currency || undefined}
+                onChange={(v) => setNewAlias({ ...newAlias, currency: v || '' })}
+                options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))}
+                style={{ width: 100 }}
+              />
+              <Button size="small" type="primary" onClick={addAlias}>添加</Button>
+            </Space>
+          </div>
+        ),
+      }]} />
 
       <Modal title="新增账户" open={addOpen} onCancel={() => setAddOpen(false)} onOk={handleAddAccount} confirmLoading={addLoading}>
         <Form layout="vertical">

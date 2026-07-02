@@ -188,6 +188,14 @@ export const RATE_DIRECTIONS = [
   { value: 'multiply', label: '× (外币×汇率=RMB)', desc: '如USDT：1U=6.65元' },
 ] as const;
 
+// 币种别名
+export interface CurrencyAlias {
+  id: string;
+  alias: string;
+  currency: string;
+  created_at: string;
+}
+
 // 采购状态常量
 export const PURCHASE_STATUSES = [
   { value: 'in_progress', label: '进行中' },

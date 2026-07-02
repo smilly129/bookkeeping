@@ -232,9 +232,11 @@ export default function AdminRecords() {
       const { data: userData } = await supabase.from('users').select('id, name').in('id', userIds);
       const userMap = new Map(userData?.map(u => [u.id, u.name]) || []);
 
-      // 构建客户查找 Map
-      const custMap = new Map(allCustomers.map(c => [c.id, c]));
-      const spMap = new Map(salespersons.map(s => [s.id, s.name]));
+      // 构建客户查找 Map（直接从数据库加载最新数据，不依赖缓存）
+      const { data: freshCustomers } = await supabase.from('customers').select('*');
+      const { data: freshSPs } = await supabase.from('salespersons').select('*');
+      const custMap = new Map((freshCustomers || allCustomers).map((c: any) => [c.id, c]));
+      const spMap = new Map((freshSPs || salespersons).map((s: any) => [s.id, s.name]));
 
       const rows: TxRow[] = txData.map(t => ({
         ...t,

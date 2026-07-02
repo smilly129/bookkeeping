@@ -113,7 +113,6 @@ export default function AdminPurchases() {
       actual_cost: form.actual_cost ? parseFloat(form.actual_cost) : null,
       status: form.status,
       notes: form.notes || null,
-    };
       user_id: (editingRow?.user_id) || (salespersons[0]?.id || ''),
     };
     if (editingRow) {

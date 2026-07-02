@@ -90,6 +90,8 @@ export default function AdminCustomerBalances() {
     const rows: CustBalance[] = custFilter.map(c => {
       const custTxs = (txs || []).filter(t => t.customer_id === c.id);
       const totalDeposit = custTxs.reduce((s, t) => {
+        // 优先用理论成本（人民币），否则用金额
+        if (t.theoretical_cost) return s + t.theoretical_cost;
         if (t.type === 'income') return s + (t.amount || 0);
         if (t.type === 'exchange') return s + (t.to_amount || 0);
         return s;
@@ -124,7 +126,7 @@ export default function AdminCustomerBalances() {
 
     const [txRes, purRes] = await Promise.all([
       supabase.from('transactions')
-        .select('id, transaction_date, currency, type, business_type, amount, from_amount, to_amount, direction, notes, theoretical_cost')
+        .select('id, transaction_date, currency, type, business_type, amount, from_amount, to_amount, exchange_rate, direction, notes, theoretical_cost')
         .eq('customer_id', row.customer_id)
         .eq('is_deleted', false)
         .order('transaction_date', { ascending: false }),
@@ -274,8 +276,12 @@ export default function AdminCustomerBalances() {
               },
             },
             {
-              title: '理论成本', dataIndex: 'theoretical_cost', key: 'tc', width: 90,
-              render: (v: number) => v != null ? v.toLocaleString() : '—',
+              title: '汇率', dataIndex: 'exchange_rate', key: 'rate', width: 80,
+              render: (v: number) => v != null ? v : '—',
+            },
+            {
+              title: '理论成本', dataIndex: 'theoretical_cost', key: 'tc', width: 100,
+              render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—',
             },
             {
               title: '方向', dataIndex: 'direction', key: 'dir', width: 60,

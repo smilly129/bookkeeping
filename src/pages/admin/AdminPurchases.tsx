@@ -335,6 +335,16 @@ export default function AdminPurchases() {
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>新增采购</Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
+          <Button onClick={async () => {
+            const monthStart = dayjs().startOf('month').toISOString();
+            const ids = data.filter(d => d.status === 'in_progress').map(d => d.id);
+            if (ids.length === 0) { message.info('没有进行中的采购单'); return; }
+            for (const id of ids) {
+              await supabase.from('purchases').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', id);
+            }
+            message.success(`本月 ${ids.length} 笔采购已标记完成`);
+            loadData();
+          }}>本月完成</Button>
         </Space>
       </div>
 

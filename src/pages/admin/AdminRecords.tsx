@@ -292,15 +292,36 @@ export default function AdminRecords() {
       transaction_date: editingRow.transaction_date,
       updated_at: new Date().toISOString(),
     };
-    if (editingRow.customer_id) {
-      updateData.customer_id = editingRow.customer_id;
+    // 客户代号处理
+    const custCode = (editingRow as any).customer_code?.trim().toUpperCase();
+    let custId = editingRow.customer_id || '';
+    if (custCode && !custId) {
+      // 自动创建新客户
+      const found = allCustomers.find(c => c.code.toUpperCase() === custCode);
+      if (found) {
+        custId = found.id;
+      } else {
+        const spId = salespersons[0]?.id || '';
+        const { data: newCust } = await supabase.from('customers').insert({
+          code: custCode,
+          salesperson_id: spId || null,
+        }).select('id').single();
+        if (newCust) custId = newCust.id;
+      }
+    }
+
+    if (custId) {
+      updateData.customer_id = custId;
       updateData.business_type = editingRow.business_type || null;
       updateData.purchase_id = editingRow.purchase_id || null;
-      if (editingRow.exchange_rate && (editingRow.amount || editingRow.from_amount)) {
-        const amt = editingRow.amount || editingRow.from_amount || 0;
-        const rate = editingRow.exchange_rate || 0;
-        const cur = editingRow.currency || editingRow.from_currency || '';
-        if (rate && amt) updateData.theoretical_cost = calcTheoretical(amt, rate, cur);
+      if (editingRow.exchange_rate) {
+        const rate = typeof editingRow.exchange_rate === 'number' ? editingRow.exchange_rate : parseFloat(String(editingRow.exchange_rate));
+        if (rate) {
+          updateData.exchange_rate = rate;
+          const amt = editingRow.amount || editingRow.from_amount || 0;
+          const cur = editingRow.currency || editingRow.from_currency || '';
+          if (amt) updateData.theoretical_cost = calcTheoretical(amt, rate, cur);
+        }
       }
     } else {
       updateData.customer_id = null;

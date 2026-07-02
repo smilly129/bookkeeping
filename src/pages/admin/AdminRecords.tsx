@@ -8,6 +8,14 @@ import { supabase, type Transaction, type Account, type Customer, type Salespers
 import dayjs from 'dayjs';
 import { parseQuickInput } from '../../utils/parseQuickInput';
 
+// 需要做除法的币种（1 RMB = X 外币）
+function calcTheoretical(amount: number, rate: number, currency: string): number {
+  const divideCurrencies = ['RUB', 'JPY', 'KRW'];
+  return divideCurrencies.includes(currency)
+    ? +(amount / rate).toFixed(4)
+    : +(amount * rate).toFixed(4);
+}
+
 interface TxRow extends Transaction {
   user_name?: string;
   from_account_name?: string;
@@ -86,7 +94,8 @@ export default function AdminRecords() {
         if (r.exchange_rate && (r.amount || r.from_amount)) {
           const amt = parseFloat(r.amount || r.from_amount);
           const rate = parseFloat(r.exchange_rate);
-          if (rate && amt) base.theoretical_cost = +(amt * rate).toFixed(4);
+          const cur = r.currency || r.from_currency || '';
+          if (rate && amt) base.theoretical_cost = calcTheoretical(amt, rate, cur);
         }
       }
     }
@@ -285,7 +294,8 @@ export default function AdminRecords() {
       if (editingRow.exchange_rate && (editingRow.amount || editingRow.from_amount)) {
         const amt = editingRow.amount || editingRow.from_amount || 0;
         const rate = editingRow.exchange_rate || 0;
-        if (rate && amt) updateData.theoretical_cost = +(amt * rate).toFixed(4);
+        const cur = editingRow.currency || editingRow.from_currency || '';
+        if (rate && amt) updateData.theoretical_cost = calcTheoretical(amt, rate, cur);
       }
     } else {
       updateData.customer_id = null;
@@ -397,7 +407,7 @@ export default function AdminRecords() {
       base.business_type = 'other';
     }
     if (r.exchange_rate) base.exchange_rate = r.exchange_rate;
-    if (r.theoretical_cost) base.theoretical_cost = r.theoretical_cost;
+    if (r.theoretical_cost != null) base.theoretical_cost = r.theoretical_cost;
 
     const { error } = await supabase.from('transactions').insert(base);
     setQuickLoading(false);
@@ -689,19 +699,20 @@ export default function AdminRecords() {
                         style={{ fontFamily: 'monospace' }}
                       />
                     </Form.Item>
-                    <Form.Item label="汇率 (1外币=?RMB)">
+                    <Form.Item label="汇率">
                       <Input
                         value={editingRow.exchange_rate || ''}
                         onChange={(e) => {
                           const rate = parseFloat(e.target.value) || 0;
                           const amt = editingRow.amount || editingRow.from_amount || 0;
+                          const cur = editingRow.currency || editingRow.from_currency || '';
                           setEditingRow({
                             ...editingRow,
                             exchange_rate: rate || undefined as any,
-                            theoretical_cost: rate && amt ? +(amt * rate).toFixed(4) : undefined,
+                            theoretical_cost: rate && amt ? calcTheoretical(amt, rate, cur) : undefined,
                           });
                         }}
-                        placeholder="如 0.08 (卢布), 6.65 (USDT)"
+                        placeholder="卢布填12.5(500÷12.5=40) / USDT填6.65(100×6.65=665)"
                       />
                     </Form.Item>
                     <Form.Item label="业务类型">
@@ -954,11 +965,11 @@ export default function AdminRecords() {
                       </div>
                     )}
                   </Form.Item>
-                  <Form.Item label="汇率 (1外币=?RMB)">
+                  <Form.Item label="汇率">
                     <Input
                       value={newRecord.exchange_rate}
                       onChange={(e) => setNewRecord({ ...newRecord, exchange_rate: e.target.value })}
-                      placeholder="如 0.08 (卢布), 6.65 (USDT)"
+                      placeholder="卢布填12.5(除) / USDT填6.65(乘)"
                     />
                   </Form.Item>
                   <Form.Item label="业务类型">
@@ -978,7 +989,11 @@ export default function AdminRecords() {
                           (() => {
                             const amt = parseFloat(newRecord.amount || newRecord.from_amount);
                             const rate = parseFloat(newRecord.exchange_rate);
-                            if (rate && amt) return `${(amt * rate).toFixed(4)} RMB`;
+                            const cur = newRecord.currency || newRecord.from_currency || '';
+                            if (rate && amt) {
+                              const tc = calcTheoretical(amt, rate, cur);
+                              return `${tc} RMB`;
+                            }
                             return '—';
                           })()
                         }

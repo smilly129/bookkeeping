@@ -29,6 +29,15 @@ const BUILTIN_CURRENCY_MAP: Record<string, string> = {
   '加元': 'CAD', 'cad': 'CAD', 'CAD': 'CAD',
 };
 
+// 需要做除法的币种（1 RMB = X 外币）
+const DIVIDE_CURRENCIES = ['RUB', 'JPY', 'KRW'];
+
+function calcTheoretical(amount: number, rate: number, currency: string): number {
+  return DIVIDE_CURRENCIES.includes(currency)
+    ? +(amount / rate).toFixed(4)
+    : +(amount * rate).toFixed(4);
+}
+
 interface AccountInfo { id: string; name: string; currency: string; user_id: string; }
 interface CustomerInfo { id: string; code: string; }
 
@@ -154,7 +163,7 @@ export function parseQuickInput(
     currency: currencyCode,
     amount: amountNum,
     exchange_rate: exchangeRate,
-    theoretical_cost: exchangeRate != null ? +(amountNum * exchangeRate).toFixed(4) : null,
+    theoretical_cost: exchangeRate != null ? calcTheoretical(amountNum, exchangeRate, currencyCode) : null,
     accountName, accountId, customerCode, customerId,
     notes: notesPart,
     warnings,
@@ -210,7 +219,7 @@ function parsePlusFormat(
   return {
     transaction_date: dateStr, type, currency: currencyCode, amount: amountNum,
     exchange_rate: exchangeRate,
-    theoretical_cost: exchangeRate != null ? +(amountNum * exchangeRate).toFixed(4) : null,
+    theoretical_cost: exchangeRate != null ? calcTheoretical(amountNum, exchangeRate, currencyCode) : null,
     accountName, accountId, customerCode, customerId,
     notes: notesPart, warnings,
   };

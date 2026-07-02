@@ -325,7 +325,7 @@ export default function AdminPurchases() {
 
   // 统计
   const totalProfit = data.reduce((s, r) => s + (r.profit || 0), 0);
-  const pendingShortfall = data.filter(r => r.shortfall > 0).length;
+  const pendingShortfall = data.filter(r => r.shortfall > 1).length;
   const totalShortfall = data.reduce((s, r) => s + Math.max(0, r.shortfall), 0);
 
   return (

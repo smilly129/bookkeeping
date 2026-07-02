@@ -49,6 +49,8 @@ export default function AdminAssets() {
   const [rateModalOpen, setRateModalOpen] = useState(false);
   const [rateRow, setRateRow] = useState<AssetRow | null>(null);
   const [rateVal, setRateVal] = useState<number | null>(null);
+  const [editInitForeign, setEditInitForeign] = useState<number | null>(null);
+  const [editInitCost, setEditInitCost] = useState<number | null>(null);
 
   // 当月统计
   const [currentMonth, setCurrentMonth] = useState(dayjs().format('YYYY-MM'));
@@ -80,11 +82,11 @@ export default function AdminAssets() {
 
     const entries = txs as JournalEntry[];
 
-    // 加载手动预估汇率
+    // 加载手动设置（预估汇率+期初）
     const { data: overrides } = await supabase.from('asset_override').select('*');
-    const overrideMap = new Map<string, number>();
+    const overrideMap = new Map<string, any>();
     overrides?.forEach((o: any) => {
-      overrideMap.set(`${o.salesperson_id}|${o.currency}`, o.estimated_rate || 0);
+      overrideMap.set(`${o.salesperson_id}|${o.currency}`, o);
     });
 
     // 按业务员+币种分组聚合
@@ -137,10 +139,16 @@ export default function AdminAssets() {
 
     const rows: AssetRow[] = [];
     groups.forEach(g => {
-      const wac = g.receivedForeign > 0 ? g.receivedCost / g.receivedForeign : 0;
-      const holding = g.receivedForeign - g.soldForeign;
+      const ov = overrideMap.get(`${g.spId}|${g.currency}`) || {};
+      const initF = ov.initial_foreign || 0;
+      const initC = ov.initial_cost || 0;
+
+      const totalRcvd = g.receivedForeign + initF;
+      const totalCost = g.receivedCost + initC;
+      const wac = totalRcvd > 0 ? totalCost / totalRcvd : 0;
+      const holding = totalRcvd - g.soldForeign;
       const hCost = holding * wac;
-      const estRate = overrideMap.get(`${g.spId}|${g.currency}`) || null;
+      const estRate = ov.estimated_rate || null;
       const estValue = holding * (estRate || 0);
       const unrealPnl = estValue - hCost;
       const realizedPnl = g.soldProceeds - (g.soldForeign * wac);
@@ -149,8 +157,8 @@ export default function AdminAssets() {
         salesperson_id: g.spId,
         salesperson_name: g.spName,
         currency: g.currency,
-        total_received_foreign: g.receivedForeign,
-        total_received_cost: g.receivedCost,
+        total_received_foreign: totalRcvd,
+        total_received_cost: totalCost,
         total_sold_foreign: g.soldForeign,
         total_sold_proceeds: g.soldProceeds,
         weighted_avg_cost: wac,
@@ -170,9 +178,14 @@ export default function AdminAssets() {
     setLoading(false);
   };
 
-  const openRateEdit = (row: AssetRow) => {
+  const openRateEdit = async (row: AssetRow) => {
     setRateRow(row);
     setRateVal(row.estimated_rate);
+    // 加载当前期初数据
+    const { data } = await supabase.from('asset_override').select('*')
+      .eq('salesperson_id', row.salesperson_id).eq('currency', row.currency).single();
+    setEditInitForeign(data?.initial_foreign || null);
+    setEditInitCost(data?.initial_cost || null);
     setRateModalOpen(true);
   };
 
@@ -182,9 +195,11 @@ export default function AdminAssets() {
       salesperson_id: rateRow.salesperson_id,
       currency: rateRow.currency,
       estimated_rate: rateVal,
+      initial_foreign: editInitForeign,
+      initial_cost: editInitCost,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'salesperson_id,currency' });
-    message.success('预估汇率已更新');
+    message.success('已保存');
     setRateModalOpen(false);
     loadData();
   };
@@ -337,26 +352,30 @@ export default function AdminAssets() {
         </div>
       )}
 
-      {/* 预估汇率编辑弹窗 */}
+      {/* 设置弹窗：期初 + 预估汇率 */}
       <Modal
-        title={`设置预估汇率 - ${rateRow?.salesperson_name} ${rateRow?.currency}`}
+        title={`${rateRow?.salesperson_name} - ${rateRow?.currency} 设置`}
         open={rateModalOpen}
         onCancel={() => setRateModalOpen(false)}
         onOk={saveRate}
+        width={420}
       >
-        <div style={{ marginBottom: 16 }}>
-          <p>当前持仓: <strong>{rateRow?.current_holding.toLocaleString()} {rateRow?.currency}</strong></p>
-          <p>持仓成本: <strong>{rateRow?.holding_cost.toFixed(2)} RMB</strong></p>
-        </div>
+        <h4>七月份之前期初持仓</h4>
+        <Space style={{ marginBottom: 16 }}>
+          <div>
+            <label>期初外币数量</label>
+            <InputNumber value={editInitForeign} onChange={(v) => setEditInitForeign(v)} placeholder="如 50000" style={{ width: 140 }} />
+          </div>
+          <div>
+            <label>期初成本(RMB)</label>
+            <InputNumber value={editInitCost} onChange={(v) => setEditInitCost(v)} placeholder="如 3500" style={{ width: 140 }} />
+          </div>
+        </Space>
+
+        <h4>预估汇率</h4>
         <div>
-          <label>预估汇率（1 {rateRow?.currency} = ? RMB）</label>
-          <InputNumber
-            value={rateVal}
-            onChange={(v) => setRateVal(v)}
-            style={{ width: '100%', marginTop: 8 }}
-            placeholder="例如 6.65"
-            step={0.0001}
-          />
+          <label>1 {rateRow?.currency} = ? RMB</label>
+          <InputNumber value={rateVal} onChange={(v) => setRateVal(v)} style={{ width: '100%', marginTop: 8 }} placeholder="例如 6.65" step={0.0001} />
         </div>
         {rateVal && rateRow && (
           <div style={{ padding: '8px 12px', marginTop: 12, background: '#f6ffed', borderRadius: 4 }}>

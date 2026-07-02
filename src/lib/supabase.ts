@@ -165,6 +165,8 @@ export interface AssetOverride {
   salesperson_id: string;
   currency: string;
   estimated_rate?: number;
+  initial_foreign?: number;
+  initial_cost?: number;
   notes?: string;
   updated_at: string;
 }

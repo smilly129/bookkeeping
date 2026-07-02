@@ -719,56 +719,36 @@ export default function AdminRecords() {
             <Form.Item label="备注">
               <Input.TextArea value={editingRow.notes || ''} onChange={(e) => setEditingRow({ ...editingRow, notes: e.target.value })} rows={2} />
             </Form.Item>
-            <Collapse
-              ghost
-              size="small"
-              items={[{
-                key: 'biz',
-                label: <span style={{ fontSize: 13, color: '#1677ff' }}>▶ 业务信息 {editingRow.customer_id ? '(已关联)' : ''}</span>,
-                children: (
-                  <div style={{ padding: '8px 0' }}>
-                    <Form.Item label="客户代号">
-                      <Input
-                        value={editingRow.customer_code || ''}
-                        onChange={(e) => {
-                          const code = e.target.value.toUpperCase();
-                          const found = allCustomers.find(c => c.code.toUpperCase() === code);
-                          setEditingRow({ ...editingRow, customer_code: e.target.value, customer_id: found?.id || '' });
-                        }}
-                        placeholder="直接输入客户代号"
-                        style={{ fontFamily: 'monospace' }}
-                      />
-                    </Form.Item>
-                    <Form.Item label="汇率">
-                      <Input
-                        value={editingRow.exchange_rate || ''}
-                        onChange={(e) => setEditingRow({ ...editingRow, exchange_rate: e.target.value || undefined as any })}
-                        placeholder="卢布12.5 / USDT 6.65"
-                      />
-                    </Form.Item>
-                    <Form.Item label="业务类型">
-                      <Select
-                        value={editingRow.business_type || undefined}
-                        onChange={(v) => setEditingRow({ ...editingRow, business_type: v || '' })}
-                        options={BUSINESS_TYPES.map(b => ({ label: b.label, value: b.value }))}
-                        allowClear
-                      />
-                    </Form.Item>
-                    <Form.Item label="关联采购">
-                      <Select
-                        value={editingRow.purchase_id || undefined}
-                        onChange={(v) => setEditingRow({ ...editingRow, purchase_id: v || '' })}
-                        options={allPurchases
-                          .filter(p => p.customer_id === editingRow.customer_id)
-                          .map(p => ({ label: `报价 ${p.quoted_price || '—'}`, value: p.id }))}
-                        placeholder="关联到采购记录（可选）"
-                        allowClear
-                      />
-                    </Form.Item>
-                  </div>
-                ),
-              }]}
-            />
+            <div style={{ marginTop: 12, padding: '8px 0', borderTop: '1px dashed #d9d9d9' }}>
+              <div style={{ fontSize: 13, color: '#1677ff', marginBottom: 8 }}>业务信息</div>
+              <Form.Item label="客户代号">
+                <Input
+                  value={editingRow.customer_code || ''}
+                  onChange={(e) => {
+                    const code = e.target.value.toUpperCase();
+                    const found = allCustomers.find(c => c.code.toUpperCase() === code);
+                    setEditingRow({ ...editingRow, customer_code: e.target.value, customer_id: found?.id || '' });
+                  }}
+                  placeholder="直接输入客户代号"
+                  style={{ fontFamily: 'monospace' }}
+                />
+              </Form.Item>
+              <Form.Item label="汇率">
+                <Input
+                  value={editingRow.exchange_rate || ''}
+                  onChange={(e) => setEditingRow({ ...editingRow, exchange_rate: e.target.value || undefined as any })}
+                  placeholder="卢布12.5 / USDT 6.65"
+                />
+              </Form.Item>
+              <Form.Item label="业务类型">
+                <Select
+                  value={editingRow.business_type || undefined}
+                  onChange={(v) => setEditingRow({ ...editingRow, business_type: v || '' })}
+                  options={BUSINESS_TYPES.map(b => ({ label: b.label, value: b.value }))}
+                  allowClear
+                />
+              </Form.Item>
+            </div>
           </Form>
         )}
       </Modal>

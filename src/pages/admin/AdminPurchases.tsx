@@ -134,7 +134,7 @@ export default function AdminPurchases() {
     // 加载采购流水（数据表格中标记为采购的 transactions）
     let txQuery = supabase.from('transactions').select(`
       id, transaction_date, customer_id, currency, amount, notes, type, theoretical_cost, business_type, purchase_id
-    `).in('business_type', ['purchase', 'exchange']).eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
+    `).not('customer_id', 'is', null).eq('is_deleted', false).order('transaction_date', { ascending: false }).limit(200);
     if (filterCust) txQuery = txQuery.eq('customer_id', filterCust);
     const { data: txs } = await txQuery;
     if (txs) setPurchaseTxs(txs);

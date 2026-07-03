@@ -97,29 +97,29 @@ export function parseQuickInput(
     t = t.replace(/收/g, ' ');
   }
 
-  // 3. 提取金额（最后出现的数字是金额）
-  const numbers = [...t.matchAll(/(\d[\d,.]*)/g)];
-  if (numbers.length >= 1) {
-    // 找主金额（最大的那个，排除日期相关的小数字）
-    const candidates = numbers.map(m => ({
-      val: parseFloat(m[1].replace(/,/g, '')),
-      str: m[1],
-      idx: m.index!,
-    }));
-    // 主金额：通常是最大的数字
-    const main = candidates.reduce((a, b) => a.val >= b.val ? a : b);
-    amountNum = main.val;
-    t = t.replace(main.str, ' ');
-
-    // 如果还有数字，可能是汇率
-    const remaining = [...t.matchAll(/(\d[\d,.]*)/g)];
-    if (remaining.length >= 1) {
-      const rateMatch = remaining[0];
-      exchangeRate = parseFloat(rateMatch[1].replace(/,/g, ''));
-      t = t.replace(rateMatch[1], ' ');
-    }
+  // 3. 提取金额（独立数字，不跟字母连在一起）
+  // 匹配前面是空格/开头、后面是空格/结尾/中文的数字
+  const amountMatch = t.match(/(?:^|[\s,，])(\d[\d,.]*)(?:[\s,，]|$|[^\d])/);
+  if (amountMatch) {
+    amountNum = parseFloat(amountMatch[1].replace(/,/g, ''));
+    t = t.replace(amountMatch[1], ' ');
   } else {
-    warnings.push('未识别到金额');
+    // 回退：找独立数字
+    const freeNums = [...t.matchAll(/(?:^|[\s,，])(\d[\d,.]*)(?:[\s,，]|$)/g)];
+    if (freeNums.length > 0) {
+      const main = freeNums.map(m => parseFloat(m[1].replace(/,/g, ''))).reduce((a, b) => a >= b ? a : b);
+      amountNum = main;
+      t = t.replace(String(main), ' ');
+    } else {
+      warnings.push('未识别到金额');
+    }
+  }
+
+  // 如果还有独立的数字，当作汇率
+  const rateMatch = t.match(/(?:^|[\s,，])(\d[\d,.]*)(?:[\s,，]|$|[^\d])/);
+  if (rateMatch && amountNum > 0) {
+    exchangeRate = parseFloat(rateMatch[1].replace(/,/g, ''));
+    t = t.replace(rateMatch[1], ' ');
   }
 
   // 4. 匹配币种

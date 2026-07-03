@@ -144,7 +144,7 @@ export default function AdminPurchases() {
     let allLinked: any[] = [];
     if (purchaseIds.length > 0) {
       const { data } = await supabase.from('transactions')
-        .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id')
+        .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id, type')
         .in('purchase_id', purchaseIds).eq('is_deleted', false)
         .order('transaction_date', { ascending: false });
       allLinked = data || [];
@@ -160,11 +160,17 @@ export default function AdminPurchases() {
     for (const p of (raw as PurchaseSummary[] || [])) {
       const linked = linkedMap.get(p.id) || [];
       if (linked.length > 0) {
-        for (const t of linked) {
-          combined.push({ ...p, tx_date: t.transaction_date, tx_currency: t.currency, tx_amount: t.amount, tx_rate: t.exchange_rate, tx_cost: t.theoretical_cost });
-        }
+        linked.forEach((t, i) => {
+          combined.push({
+            ...p,
+            tx_date: t.transaction_date, tx_currency: t.currency, tx_amount: t.amount,
+            tx_rate: t.exchange_rate, tx_cost: t.theoretical_cost,
+            _txType: t.type,
+            _showPrice: i === 0,  // 只有第一行显示报价/利润
+          });
+        });
       } else {
-        combined.push({ ...p, tx_date: '', tx_currency: '', tx_amount: null, tx_rate: null, tx_cost: null });
+        combined.push({ ...p, tx_date: '', tx_currency: '', tx_amount: null, tx_rate: null, tx_cost: null, _txType: '', _showPrice: true });
       }
     }
     if (filterCust) setCombinedRows(combined.filter(r => r.customer_id === filterCust));
@@ -411,19 +417,24 @@ export default function AdminPurchases() {
       <Table
         columns={[
           { title: '客户代号', dataIndex: 'customer_code', key: 'c', width: 100, render: (c: string) => <Tag color="blue">{c}</Tag> },
-          { title: '打款日期', dataIndex: 'tx_date', key: 'd', width: 100, render: (v: string) => v || '—' },
+          { title: '日期', dataIndex: 'tx_date', key: 'd', width: 100, render: (v: string) => v || '—' },
+          {
+            title: '收/付', key: 'io', width: 55,
+            render: (_: any, r: any) => r._txType === 'expense' ? <Tag color="red">付</Tag> : r.tx_date ? <Tag color="green">收</Tag> : null,
+          },
           { title: '币种', dataIndex: 'tx_currency', key: 'cur', width: 60, render: (v: string) => v || '—' },
           { title: '金额', dataIndex: 'tx_amount', key: 'amt', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
           { title: '汇率', dataIndex: 'tx_rate', key: 'rate', width: 70, render: (v: number) => v != null ? v : '—' },
           { title: '理论成本', dataIndex: 'tx_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
-          { title: '报价', dataIndex: 'quoted_price', key: 'qp', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
-          { title: '实际支出', dataIndex: 'actual_cost', key: 'ac', width: 90, render: (v: number) => v != null ? v.toLocaleString() : '—' },
-          { title: '利润', dataIndex: 'profit', key: 'pf', width: 80, render: (v: number) => v != null ? <span style={{ color: v >= 0 ? '#52c41a' : '#ff4d4f' }}>{v.toLocaleString()}</span> : '—' },
+          { title: '报价', key: 'qp', width: 90, render: (_: any, r: any) => r._showPrice ? (r.quoted_price != null ? r.quoted_price.toLocaleString() : '—') : '' },
+          { title: '实际支出', key: 'ac', width: 90, render: (_: any, r: any) => r._showPrice ? (r.actual_cost != null ? r.actual_cost.toLocaleString() : '—') : '' },
+          { title: '利润', key: 'pf', width: 80, render: (_: any, r: any) => r._showPrice && r.profit != null ? <span style={{ color: r.profit >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.profit.toLocaleString()}</span> : '' },
           {
-            title: '状态', dataIndex: 'shortfall', key: 'st', width: 80,
-            render: (v: number, r: any) => {
-              if (r.tx_date && v <= 1) return <Tag color="green">已匹配</Tag>;
-              if (v > 1) return <Tag color="red">待补{v.toLocaleString()}</Tag>;
+            title: '状态', key: 'st', width: 80,
+            render: (_: any, r: any) => {
+              if (!r._showPrice) return '';
+              if (r.tx_date && r.shortfall <= 1) return <Tag color="green">已匹配</Tag>;
+              if (r.shortfall > 1) return <Tag color="red">待补{r.shortfall.toLocaleString()}</Tag>;
               if (!r.tx_date) return <Tag>未打款</Tag>;
               return <Tag>—</Tag>;
             },

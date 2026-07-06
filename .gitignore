@@ -27,3 +27,5 @@ supabase/.temp/
 *.sw?
 
 .vercel
+*.xlsx
+~$*

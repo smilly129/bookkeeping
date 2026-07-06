@@ -203,3 +203,65 @@ export const PURCHASE_STATUSES = [
   { value: 'in_progress', label: '进行中' },
   { value: 'completed', label: '已完成' },
 ] as const;
+
+// ========== 采购账户对账模块新增类型 ==========
+
+// Excel 明细行
+export interface ExcelItem {
+  size?: string;
+  qty: number;
+  unit_price: number;
+  amount: number;
+  express: number;
+  procurement_price: number;
+}
+
+// 转款/代付记录
+export interface ProcurementTransfer {
+  id: string;
+  amount: number;
+  transfer_date: string;
+  transfer_type: 'transfer' | 'proxy';
+  notes?: string;
+  created_at: string;
+}
+
+// Excel 导入记录
+export interface ProcurementExcelRecord {
+  id: string;
+  record_date: string;
+  customer_code: string;
+  quoted_price: number | null;
+  items: ExcelItem[];
+  total_amount: number;
+  total_express: number;
+  total_procurement: number;
+  amount_diff: number;
+  purchase_id: string | null;
+  upload_batch_id: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+// 资金对账记录
+export interface ProcurementReconciliation {
+  id: string;
+  reconcile_date: string;
+  opening_balance: number;
+  total_transfers: number;
+  total_payments: number;
+  system_balance: number;
+  actual_balance: number;
+  difference: number;
+  notes?: string;
+  submitted_by: string;
+  status: 'pending' | 'matched' | 'mismatch' | 'resolved';
+  created_at: string;
+}
+
+// 转款类型常量
+export const TRANSFER_TYPES = [
+  { value: 'transfer', label: '转款' },
+  { value: 'proxy', label: '代付' },
+] as const;

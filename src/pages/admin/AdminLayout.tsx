@@ -19,6 +19,7 @@ import AdminSalesManage from './AdminSalesManage';
 import AdminPurchases from './AdminPurchases';
 import AdminCustomerBalances from './AdminCustomerBalances';
 import AdminAssets from './AdminAssets';
+import AdminProcurementReconcile from './AdminProcurementReconcile';
 
 const { Header, Sider, Content } = Layout;
 
@@ -35,6 +36,7 @@ const menuItems = [
     label: '业务管理',
     children: [
       { key: '/sales/purchases', icon: <ShoppingCartOutlined />, label: '采购管理' },
+      { key: '/sales/procurement-reconcile', icon: <CheckCircleOutlined />, label: '采购账户对账' },
       { key: '/sales/customer-balances', icon: <AuditOutlined />, label: '客户对账' },
       { key: '/sales/assets', icon: <PieChartOutlined />, label: '资产总表' },
       { key: '/sales/manage', icon: <TeamOutlined />, label: '业务员/客户' },
@@ -125,6 +127,7 @@ export default function AdminLayout() {
             <Route path="/users" element={<AdminUsers />} />
             <Route path="/sales/manage" element={<AdminSalesManage />} />
             <Route path="/sales/purchases" element={<AdminPurchases />} />
+            <Route path="/sales/procurement-reconcile" element={<AdminProcurementReconcile />} />
             <Route path="/sales/customer-balances" element={<AdminCustomerBalances />} />
             <Route path="/sales/assets" element={<AdminAssets />} />
           </Routes>

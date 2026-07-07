@@ -39,6 +39,9 @@ export default function AdminProcurementReconcile() {
   const [purchases, setPurchases] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 截止日期
+  const [cutoffDate, setCutoffDate] = useState(dayjs().format('YYYY-MM-DD'));
+
   // 期初余额
   const [openingBalance, setOpeningBalance] = useState(0);
   const [openingDate, setOpeningDate] = useState('');
@@ -120,9 +123,13 @@ export default function AdminProcurementReconcile() {
 
   useEffect(() => { loadData(); }, []);
 
+  // ========== 按截止日期过滤 ==========
+  const filteredTransfers = transfers.filter(t => t.transfer_date <= cutoffDate);
+  const filteredExcelRecords = excelRecords.filter(r => r.record_date <= cutoffDate);
+
   // ========== 计算汇总 ==========
-  const totalTransfers = transfers.reduce((sum, t) => sum + (t.amount || 0), 0);
-  const totalPayments = excelRecords.reduce((sum, r) => sum + (r.total_procurement || 0), 0);
+  const totalTransfers = filteredTransfers.reduce((sum, t) => sum + (t.amount || 0), 0);
+  const totalPayments = filteredExcelRecords.reduce((sum, r) => sum + (r.total_procurement || 0), 0);
   const systemBalance = openingBalance + totalTransfers - totalPayments;
 
   // ========== 流水表 ==========
@@ -146,7 +153,7 @@ export default function AdminProcurementReconcile() {
     }
 
     // 转款和代付
-    transfers.forEach(t => {
+    filteredTransfers.forEach(t => {
       rows.push({
         key: `transfer-${t.id}`,
         date: t.transfer_date,
@@ -162,7 +169,7 @@ export default function AdminProcurementReconcile() {
     });
 
     // Excel 采购付款
-    excelRecords.forEach(r => {
+    filteredExcelRecords.forEach(r => {
       rows.push({
         key: `payment-${r.id}`,
         date: r.record_date,
@@ -690,6 +697,13 @@ export default function AdminProcurementReconcile() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>📊 采购账户对账</h2>
         <Space>
+          <span style={{ color: '#666', fontSize: 14 }}>截止日期:</span>
+          <DatePicker
+            value={dayjs(cutoffDate)}
+            onChange={(d) => setCutoffDate(d ? d.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'))}
+            style={{ width: 130 }}
+            allowClear={false}
+          />
           <Upload
             accept=".xlsx,.xls"
             showUploadList={false}
@@ -767,12 +781,12 @@ export default function AdminProcurementReconcile() {
       {/* 采购单核对 */}
       <Collapse style={{ marginBottom: 16 }} items={[{
         key: 'reconcile',
-        label: <span style={{ fontWeight: 600 }}>🔍 采购单核对 ({excelRecords.length}条)</span>,
+        label: <span style={{ fontWeight: 600 }}>🔍 采购单核对 ({filteredExcelRecords.length}条)</span>,
         children: (
           <div>
             <Table
               columns={reconcileColumns}
-              dataSource={excelRecords}
+              dataSource={filteredExcelRecords}
               rowKey="id"
               loading={loading}
               size="small"

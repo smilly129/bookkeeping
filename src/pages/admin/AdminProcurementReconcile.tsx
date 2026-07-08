@@ -275,6 +275,9 @@ export default function AdminProcurementReconcile() {
             // 表头行
             if (colA === '客户代码') continue;
 
+            // 跳过月份标题行和非客户行（如 "2026/7月份"）
+            if (colA && (colA.includes('月') || colA.includes('年') || colA.includes('份') || /^\d{4}\/\d+/.test(colA))) continue;
+
             // 客户数据行：A列有客户代码
             if (colA && !colA.match(/^\d{4}-\d{2}-\d{2}/) && colA !== '客户代码') {
               // 保存上一个客户块

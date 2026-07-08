@@ -355,7 +355,6 @@ export default function AdminProcurementReconcile() {
         if (!existing) {
           newRecs.push(p);
         } else if (
-          Math.abs((existing.quoted_price || 0) - (p.quoted_price || 0)) > 0.01 ||
           Math.abs(existing.total_procurement - p.total_procurement) > 0.01
         ) {
           changed.push({ old: existing, new: p });
@@ -587,51 +586,17 @@ export default function AdminProcurementReconcile() {
     { title: '日期', dataIndex: 'record_date', key: 'date', width: 100 },
     { title: '客户代号', dataIndex: 'customer_code', key: 'customer', width: 110, render: (v: string) => <Tag>{v}</Tag> },
     {
-      title: 'Excel报价', dataIndex: 'quoted_price', key: 'excel_quote', width: 110,
-      render: (v: number | null) => v != null ? v.toLocaleString() : '-',
+      title: '采购价', dataIndex: 'total_procurement', key: 'procurement', width: 120,
+      render: (v: number) => <span style={{ fontWeight: 600 }}>{v.toLocaleString()}</span>,
     },
     {
-      title: '系统报价', key: 'sys_quote', width: 110,
-      render: (_: any, r: ProcurementExcelRecord) => {
-        const mp = findMatchingPurchase(r);
-        return mp ? mp.quoted_price?.toLocaleString() ?? '-' : <Tag color="default">未录入</Tag>;
-      },
+      title: '溢价', dataIndex: 'amount_diff', key: 'amount_diff', width: 100,
+      render: (v: number) => v !== 0
+        ? <Tag color={v > 0 ? 'warning' : 'success'}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Tag>
+        : <Tag color="success">0</Tag>,
     },
-    {
-      title: '报差', key: 'quote_diff', width: 80,
-      render: (_: any, r: ProcurementExcelRecord) => {
-        const mp = findMatchingPurchase(r);
-        if (!mp) return <Tag color="warning">⚠</Tag>;
-        const diff = (r.quoted_price || 0) - (mp.quoted_price || 0);
-        if (Math.abs(diff) < 0.01) return <Tag color="success" icon={<CheckCircleOutlined />}>0</Tag>;
-        return <Tag color="error">{diff > 0 ? '+' : ''}{diff.toFixed(2)}</Tag>;
-      },
-    },
-    {
-      title: 'Excel实付', dataIndex: 'total_procurement', key: 'excel_pay', width: 110,
-      render: (v: number) => v.toLocaleString(),
-    },
-    {
-      title: '系统实花', key: 'sys_cost', width: 110,
-      render: (_: any, r: ProcurementExcelRecord) => {
-        const mp = findMatchingPurchase(r);
-        return mp ? mp.actual_cost?.toLocaleString() ?? '-' : <Tag color="default">未录入</Tag>;
-      },
-    },
-    {
-      title: '花差', key: 'cost_diff', width: 80,
-      render: (_: any, r: ProcurementExcelRecord) => {
-        const mp = findMatchingPurchase(r);
-        if (!mp) return <Tag color="warning">⚠</Tag>;
-        const diff = r.total_procurement - (mp.actual_cost || 0);
-        if (Math.abs(diff) < 0.01) return <Tag color="success" icon={<CheckCircleOutlined />}>0</Tag>;
-        return <Tag color="error">{diff > 0 ? '+' : ''}{diff.toFixed(2)}</Tag>;
-      },
-    },
-    {
-      title: '溢价', dataIndex: 'amount_diff', key: 'amount_diff', width: 80,
-      render: (v: number) => v !== 0 ? <Tag color={v > 0 ? 'warning' : 'success'}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Tag> : <Tag>0</Tag>,
-    },
+    { title: '明细数', dataIndex: 'items', key: 'items_count', width: 70,
+      render: (items: ExcelItem[]) => `${items.length || 0}行` },
     {
       title: '操作', key: 'actions', width: 160,
       render: (_: any, r: ProcurementExcelRecord) => (
@@ -791,7 +756,7 @@ export default function AdminProcurementReconcile() {
               loading={loading}
               size="small"
               pagination={{ pageSize: 30 }}
-              scroll={{ x: 1200 }}
+              scroll={{ x: 800 }}
               locale={{ emptyText: '暂无Excel记录' }}
               expandable={{
                 expandedRowRender: (record: ProcurementExcelRecord) => (
@@ -854,12 +819,10 @@ export default function AdminProcurementReconcile() {
                         {(() => {
                           const mp = findMatchingPurchase(record);
                           if (!mp) return <Tag color="default">系统: 未录入采购单</Tag>;
-                          const qDiff = (record.quoted_price || 0) - (mp.quoted_price || 0);
                           const cDiff = record.total_procurement - (mp.actual_cost || 0);
-                          const ok = Math.abs(qDiff) < 0.01 && Math.abs(cDiff) < 0.01;
-                          return ok
-                            ? <Tag color="success" icon={<CheckCircleOutlined />}>系统核对: 报价/实花一致 ✓</Tag>
-                            : <Tag color="error" icon={<WarningOutlined />}>系统核对: 报差{qDiff > 0 ? '+' : ''}{qDiff.toFixed(2)}, 花差{cDiff > 0 ? '+' : ''}{cDiff.toFixed(2)}</Tag>;
+                          return Math.abs(cDiff) < 0.01
+                            ? <Tag color="success" icon={<CheckCircleOutlined />}>系统: 采购价与实花一致 ✓</Tag>
+                            : <Tag color="error" icon={<WarningOutlined />}>系统: 实花差{cDiff > 0 ? '+' : ''}{cDiff.toFixed(2)}</Tag>;
                         })()}
                       </span>
                     </div>
@@ -974,7 +937,8 @@ export default function AdminProcurementReconcile() {
               columns={[
                 { title: '日期', dataIndex: 'record_date', width: 100 },
                 { title: '客户', dataIndex: 'customer_code', width: 110 },
-                { title: '报价', dataIndex: 'quoted_price', width: 100, render: (v: number | null) => v?.toLocaleString() ?? '-' },
+
+                { title: '明细', dataIndex: 'items', width: 60, render: (items: ExcelItem[]) => `${items.length || 0}行` },
                 { title: '采购价', dataIndex: 'total_procurement', width: 100, render: (v: number) => v.toLocaleString() },
                 { title: '溢价', dataIndex: 'amount_diff', width: 80,
                   render: (v: number) => <Tag color={Math.abs(v) < 0.01 ? 'success' : 'warning'}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Tag> },
@@ -996,7 +960,8 @@ export default function AdminProcurementReconcile() {
                 message={
                   <span>
                     <strong>{c.old.customer_code}</strong> ({c.old.record_date}):
-                    报价 {c.old.quoted_price ?? '-'} → {c.new.quoted_price ?? '-'}，
+
+                    采购价 {c.old.total_procurement} → {c.new.total_procurement}
                     采购价 {c.old.total_procurement} → {c.new.total_procurement}
                   </span>
                 }

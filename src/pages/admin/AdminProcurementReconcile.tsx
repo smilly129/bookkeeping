@@ -267,16 +267,24 @@ export default function AdminProcurementReconcile() {
             currentItems = [];
           };
 
+          // 清洗货币格式: "¥1,234.56" → 1234.56
+          const cleanFloat = (v: any): number => {
+            if (v == null || v === '') return 0;
+            const s = String(v).replace(/[¥￥$元,，\s]/g, '');
+            const n = parseFloat(s);
+            return isNaN(n) ? 0 : n;
+          };
+
           for (const row of json) {
             if (!row || row.length === 0) continue;
 
             const colA = String(row[0] ?? '').trim();
             const colB = row[1];
-            const colH = parseFloat(row[7]) || 0;  // 数量
-            const colI = parseFloat(row[8]) || 0;  // 单价
-            const colJ = parseFloat(row[9]) || 0;  // 金额
-            const colK = parseFloat(row[10]) || 0; // 快递费
-            const colL = parseFloat(row[11]) || 0; // 采购价
+            const colH = cleanFloat(row[7]);  // 数量
+            const colI = cleanFloat(row[8]);  // 单价
+            const colJ = cleanFloat(row[9]);  // 金额
+            const colK = cleanFloat(row[10]); // 快递费
+            const colL = cleanFloat(row[11]); // 采购价
 
             // 日期行（支持字符串日期和序列数字日期）
             const dateStr = serialToDate(row[0]);
@@ -299,7 +307,7 @@ export default function AdminProcurementReconcile() {
               // 保存上一个客户块
               saveCurrentBlock();
               currentCustomer = colA;
-              currentQuoted = colB ? parseFloat(String(colB)) : null;
+              currentQuoted = colB ? cleanFloat(colB) : null;
               // 如果该行也有采购价数据，加入明细
               if (colL > 0 && (colH > 0 || colJ > 0)) {
                 currentItems.push({

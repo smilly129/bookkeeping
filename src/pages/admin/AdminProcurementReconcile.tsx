@@ -179,7 +179,7 @@ export default function AdminProcurementReconcile() {
         income: 0,
         expense: r.total_procurement,
         balance: 0,
-        notes: r.quoted_price ? `报价${r.quoted_price}` : '',
+        notes: '',
         sourceId: r.id,
         sourceTable: 'excel_records',
       });

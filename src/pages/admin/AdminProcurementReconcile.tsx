@@ -220,7 +220,23 @@ export default function AdminProcurementReconcile() {
           const data = e.target?.result;
           const wb = XLSX.read(data, { type: 'binary' });
           const ws = wb.Sheets[wb.SheetNames[0]];
-          const json = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+          const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as any[][];
+
+          // 将 Excel 序列日期数字转为日期字符串
+          const serialToDate = (v: any): string | null => {
+            if (!v) return null;
+            if (v instanceof Date) return dayjs(v).format('YYYY-MM-DD');
+            const num = parseFloat(String(v));
+            if (num > 40000 && num < 70000) {
+              // Excel 序列号转日期 (1900-01-01 = 1)
+              const d = new Date((num - 25569) * 86400 * 1000);
+              return dayjs(d).format('YYYY-MM-DD');
+            }
+            const s = String(v).trim();
+            const m = s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+            if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+            return null;
+          };
 
           const records: ProcurementExcelRecord[] = [];
           let currentDate = '';
@@ -262,13 +278,13 @@ export default function AdminProcurementReconcile() {
             const colK = parseFloat(row[10]) || 0; // 快递费
             const colL = parseFloat(row[11]) || 0; // 采购价
 
-            // 日期行
-            if (colA.match(/^\d{4}-\d{2}-\d{2}/) || row[0] instanceof Date) {
+            // 日期行（支持字符串日期和序列数字日期）
+            const dateStr = serialToDate(row[0]);
+            if (dateStr || colA.match(/^\d{4}-\d{2}-\d{2}/)) {
               saveCurrentBlock();
               currentCustomer = '';
               currentQuoted = null;
-              const d = row[0] instanceof Date ? row[0] : new Date(colA);
-              currentDate = dayjs(d).format('YYYY-MM-DD');
+              if (dateStr) currentDate = dateStr;
               continue;
             }
 
@@ -601,12 +617,6 @@ export default function AdminProcurementReconcile() {
     {
       title: '采购价', dataIndex: 'total_procurement', key: 'procurement', width: 120,
       render: (v: number) => <span style={{ fontWeight: 600 }}>{v.toLocaleString()}</span>,
-    },
-    {
-      title: '溢价', dataIndex: 'amount_diff', key: 'amount_diff', width: 100,
-      render: (v: number) => v !== 0
-        ? <Tag color={v > 0 ? 'warning' : 'success'}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Tag>
-        : <Tag color="success">0</Tag>,
     },
     { title: '明细数', dataIndex: 'items', key: 'items_count', width: 70,
       render: (items: ExcelItem[]) => `${items.length || 0}行` },
@@ -952,9 +962,7 @@ export default function AdminProcurementReconcile() {
                 { title: '客户', dataIndex: 'customer_code', width: 110 },
 
                 { title: '明细', dataIndex: 'items', width: 60, render: (items: ExcelItem[]) => `${items.length || 0}行` },
-                { title: '采购价', dataIndex: 'total_procurement', width: 100, render: (v: number) => v.toLocaleString() },
-                { title: '溢价', dataIndex: 'amount_diff', width: 80,
-                  render: (v: number) => <Tag color={Math.abs(v) < 0.01 ? 'success' : 'warning'}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Tag> },
+                { title: '采购价', dataIndex: 'total_procurement', width: 120, render: (v: number) => v.toLocaleString() },
               ]}
               size="small"
               pagination={false}

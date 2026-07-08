@@ -355,6 +355,9 @@ export default function AdminProcurementReconcile() {
   const handleUpload = async (file: File) => {
     try {
       const parsed = await parseExcel(file);
+      console.log('=== 解析结果 ===');
+      parsed.forEach((r, i) => console.log(`[${i}] 日期=${r.record_date} 客户=${r.customer_code} 报价=${r.quoted_price} 采购价=${r.total_procurement} 明细=${r.items?.length || 0}行`));
+      console.log(`共 ${parsed.length} 条`);
       setParsedRecords(parsed);
 
       // 增量比对

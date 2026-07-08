@@ -382,7 +382,13 @@ export default function AdminProcurementReconcile() {
     setUploadSaving(true);
     try {
       const batchId = `batch_${Date.now()}`;
-      const toSave = mode === 'new' ? uploadDiff.new : [...uploadDiff.new, ...uploadDiff.changed.map(c => c.new)];
+      const toSaveAll = mode === 'new' ? uploadDiff.new : [...uploadDiff.new, ...uploadDiff.changed.map(c => c.new)];
+
+      // 过滤掉无效记录（没有客户代号或日期）
+      const toSave = toSaveAll.filter(r => r.customer_code && r.record_date && r.total_procurement > 0);
+      if (toSave.length < toSaveAll.length) {
+        message.warning(`跳过 ${toSaveAll.length - toSave.length} 条无效记录（缺少客户代号或日期）`);
+      }
 
       if (toSave.length > 0) {
         const inserts = toSave.map(r => ({
@@ -397,8 +403,12 @@ export default function AdminProcurementReconcile() {
           upload_batch_id: batchId,
         }));
 
+        console.log('Saving records:', JSON.stringify(inserts.map(r => ({ ...r, items: `${r.items.length} items` }))));
         const { error } = await supabase.from('procurement_excel_records').insert(inserts);
-        if (error) throw error;
+        if (error) {
+          console.error('Insert error:', error);
+          throw new Error(`数据库错误: ${error.message} (code: ${error.code})`);
+        }
       }
 
       // 更新变更的记录

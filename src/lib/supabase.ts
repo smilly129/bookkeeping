@@ -237,6 +237,8 @@ export interface ProcurementExcelRecord {
   total_express: number;
   total_procurement: number;
   amount_diff: number;
+  pending_balance: number;
+  refund_amount: number;
   purchase_id: string | null;
   upload_batch_id: string | null;
   is_active: boolean;

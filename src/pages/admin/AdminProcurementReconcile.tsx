@@ -129,7 +129,7 @@ export default function AdminProcurementReconcile() {
 
   // ========== 计算汇总 ==========
   const totalTransfers = filteredTransfers.reduce((sum, t) => sum + (t.amount || 0), 0);
-  const totalPayments = filteredExcelRecords.reduce((sum, r) => sum + (r.total_procurement || 0), 0);
+  const totalPayments = filteredExcelRecords.reduce((sum, r) => sum + ((r.total_procurement || 0) - (r.pending_balance || 0) + (r.refund_amount || 0)), 0);
   const systemBalance = openingBalance + totalTransfers - totalPayments;
 
   // ========== 流水表 ==========
@@ -170,6 +170,7 @@ export default function AdminProcurementReconcile() {
 
     // Excel 采购付款
     filteredExcelRecords.forEach(r => {
+      const netPayment = (r.total_procurement || 0) - (r.pending_balance || 0) + (r.refund_amount || 0);
       rows.push({
         key: `payment-${r.id}`,
         date: r.record_date,
@@ -177,9 +178,9 @@ export default function AdminProcurementReconcile() {
         typeLabel: '采购',
         customer_code: r.customer_code,
         income: 0,
-        expense: r.total_procurement,
+        expense: netPayment,
         balance: 0,
-        notes: '',
+        notes: r.pending_balance ? `待付${r.pending_balance}` : r.refund_amount ? `回款${r.refund_amount}` : '',
         sourceId: r.id,
         sourceTable: 'excel_records',
       });
@@ -383,6 +384,13 @@ export default function AdminProcurementReconcile() {
         parsedKeys.add(key);
         const existing = existingMap.get(key);
         if (!existing) {
+          // 新记录：尝试从已有记录继承尾款和回款（同客户最新一条）
+          const sameCust = excelRecords.filter(x => x.customer_code === p.customer_code && x.is_active);
+          if (sameCust.length > 0) {
+            const latest = sameCust.reduce((a, b) => a.record_date > b.record_date ? a : b);
+            p.pending_balance = latest.pending_balance || 0;
+            p.refund_amount = latest.refund_amount || 0;
+          }
           newRecs.push(p);
         } else if (
           Math.abs(existing.total_procurement - p.total_procurement) > 0.01
@@ -430,6 +438,8 @@ export default function AdminProcurementReconcile() {
           total_express: r.total_express,
           total_procurement: r.total_procurement,
           amount_diff: r.amount_diff,
+          pending_balance: r.pending_balance || 0,
+          refund_amount: r.refund_amount || 0,
           upload_batch_id: batchId,
         }));
 
@@ -622,14 +632,55 @@ export default function AdminProcurementReconcile() {
   ];
 
   // ========== 采购单核对列 ==========
+  // 尾款/回款更新
+  const updatePendRefund = async (id: string, field: 'pending_balance' | 'refund_amount', value: number) => {
+    await supabase.from('procurement_excel_records').update({ [field]: value, updated_at: new Date().toISOString() }).eq('id', id);
+    setExcelRecords(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
   const reconcileColumns = [
     { title: '日期', dataIndex: 'record_date', key: 'date', width: 100 },
     { title: '客户代号', dataIndex: 'customer_code', key: 'customer', width: 110, render: (v: string) => <Tag>{v}</Tag> },
     {
-      title: '采购价', dataIndex: 'total_procurement', key: 'procurement', width: 120,
+      title: '采购价', dataIndex: 'total_procurement', key: 'procurement', width: 110,
       render: (v: number) => <span style={{ fontWeight: 600 }}>{v.toLocaleString()}</span>,
     },
-    { title: '明细数', dataIndex: 'items', key: 'items_count', width: 70,
+    {
+      title: '待付尾款', key: 'pending', width: 100,
+      render: (_: any, r: ProcurementExcelRecord) => (
+        <InputNumber size="small" min={0} precision={2} style={{ width: 90 }}
+          value={r.pending_balance || 0}
+          onChange={(v) => updatePendRefund(r.id, 'pending_balance', v || 0)}
+          placeholder="0" />
+      ),
+    },
+    {
+      title: '回款', key: 'refund', width: 100,
+      render: (_: any, r: ProcurementExcelRecord) => (
+        <InputNumber size="small" min={0} precision={2} style={{ width: 90 }}
+          value={r.refund_amount || 0}
+          onChange={(v) => updatePendRefund(r.id, 'refund_amount', v || 0)}
+          placeholder="0" />
+      ),
+    },
+    {
+      title: '实付', key: 'net', width: 110,
+      render: (_: any, r: ProcurementExcelRecord) => {
+        const net = (r.total_procurement || 0) - (r.pending_balance || 0) + (r.refund_amount || 0);
+        return <span style={{ fontWeight: 700, color: net < 0 ? '#ff4d4f' : '#1677ff' }}>{net.toLocaleString()}</span>;
+      },
+    },
+    {
+      title: '状态', key: 'status', width: 90,
+      render: (_: any, r: ProcurementExcelRecord) => {
+        const net = (r.total_procurement || 0) - (r.pending_balance || 0) + (r.refund_amount || 0);
+        const diff = net - (r.total_procurement || 0);
+        if (Math.abs(diff) < 0.01) return <Tag color="success">已结清</Tag>;
+        if (diff < 0) return <Tag color="warning">待补款</Tag>;
+        return <Tag color="processing">待退款</Tag>;
+      },
+    },
+    { title: '明细数', dataIndex: 'items', key: 'items_count', width: 65,
       render: (items: ExcelItem[]) => `${items.length || 0}行` },
     {
       title: '操作', key: 'actions', width: 160,
@@ -790,7 +841,7 @@ export default function AdminProcurementReconcile() {
               loading={loading}
               size="small"
               pagination={{ pageSize: 30 }}
-              scroll={{ x: 800 }}
+              scroll={{ x: 1100 }}
               locale={{ emptyText: '暂无Excel记录' }}
               expandable={{
                 expandedRowRender: (record: ProcurementExcelRecord) => (

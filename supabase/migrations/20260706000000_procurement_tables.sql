@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS procurement_excel_records (
   total_express      DECIMAL(18,4) DEFAULT 0,
   total_procurement  DECIMAL(18,4) DEFAULT 0,
   amount_diff        DECIMAL(18,4) DEFAULT 0,
+  pending_balance    DECIMAL(18,2) DEFAULT 0,
+  refund_amount      DECIMAL(18,2) DEFAULT 0,
   purchase_id        UUID,
   upload_batch_id    TEXT,
   is_active          BOOLEAN DEFAULT TRUE,

@@ -1,0 +1,1 @@
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS customer_deposit DECIMAL(18,2) DEFAULT 0;

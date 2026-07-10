@@ -146,6 +146,7 @@ export interface Purchase {
   currency: string;
   quoted_price?: number;
   actual_cost?: number;
+  customer_deposit?: number;
   status: 'in_progress' | 'completed';
   notes?: string;
   created_at: string;

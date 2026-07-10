@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Table, Button, Select, Space, Tag, Modal, Input, message,
+  Table, Button, Select, Space, Tag, Modal, Input, InputNumber, message,
 } from 'antd';
 import { ExportOutlined, SearchOutlined } from '@ant-design/icons';
 import { supabase, type Salesperson, type Customer, type PurchaseSummary } from '../../lib/supabase';
@@ -115,7 +115,10 @@ export default function AdminCustomerBalances() {
       };
     });
 
-    setData(rows);
+    // 过滤：存款余额绝对值 <= 1 的忽略
+    const filtered = rows.filter(r => Math.abs(r.available_balance) > 1);
+
+    setData(filtered);
     setLoading(false);
   };
 
@@ -302,8 +305,39 @@ export default function AdminCustomerBalances() {
         <Table
           columns={[
             { title: '币种', dataIndex: 'currency', key: 'cur', width: 60 },
-            { title: '报价', dataIndex: 'quoted_price', key: 'price', width: 80, render: (v: number) => v?.toLocaleString() || '—' },
-            { title: '实际支出', dataIndex: 'actual_cost', key: 'cost', width: 80, render: (v: number) => v?.toLocaleString() || '—' },
+            { title: '报价', dataIndex: 'quoted_price', key: 'price', width: 90,
+              render: (_: number, r: any) => (
+                <InputNumber size="small" style={{ width: 80 }}
+                  value={r.quoted_price}
+                  onChange={async (v) => {
+                    const val = v || 0;
+                    setDetailPurchases(prev => prev.map(p => p.id === r.id ? { ...p, quoted_price: val, profit: val - (p.actual_cost || 0) } : p));
+                    await supabase.from('purchases').update({ quoted_price: val, updated_at: new Date().toISOString() }).eq('id', r.id);
+                  }} />
+              ),
+            },
+            { title: '实际支出', dataIndex: 'actual_cost', key: 'cost', width: 90,
+              render: (_: number, r: any) => (
+                <InputNumber size="small" style={{ width: 80 }}
+                  value={r.actual_cost}
+                  onChange={async (v) => {
+                    const val = v || 0;
+                    setDetailPurchases(prev => prev.map(p => p.id === r.id ? { ...p, actual_cost: val, profit: (p.quoted_price || 0) - val } : p));
+                    await supabase.from('purchases').update({ actual_cost: val, updated_at: new Date().toISOString() }).eq('id', r.id);
+                  }} />
+              ),
+            },
+            { title: '存款', dataIndex: 'customer_deposit', key: 'dep', width: 90,
+              render: (_: number, r: any) => (
+                <InputNumber size="small" style={{ width: 80 }}
+                  value={r.customer_deposit || 0}
+                  onChange={async (v) => {
+                    const val = v || 0;
+                    setDetailPurchases(prev => prev.map(p => p.id === r.id ? { ...p, customer_deposit: val } : p));
+                    await supabase.from('purchases').update({ customer_deposit: val, updated_at: new Date().toISOString() }).eq('id', r.id);
+                  }} />
+              ),
+            },
             {
               title: '已收款', dataIndex: 'total_received', key: 'recv', width: 80,
               render: (v: number) => v?.toLocaleString() || '0',

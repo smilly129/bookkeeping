@@ -99,7 +99,7 @@ export default function AdminPurchases() {
   // 弹窗
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<PurchaseSummary | null>(null);
-  const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+  const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', customer_deposit: '', status: 'in_progress', notes: '' });
 
   useEffect(() => {
     loadLookups();
@@ -182,7 +182,7 @@ export default function AdminPurchases() {
 
   const openAdd = () => {
     setEditingRow(null);
-    setForm({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', status: 'in_progress', notes: '' });
+    setForm({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', customer_deposit: '', status: 'in_progress', notes: '' });
     setModalOpen(true);
   };
 
@@ -194,6 +194,7 @@ export default function AdminPurchases() {
       currency: r.currency,
       quoted_price: r.quoted_price != null ? String(r.quoted_price) : '',
       actual_cost: r.actual_cost != null ? String(r.actual_cost) : '',
+      customer_deposit: r.customer_deposit != null ? String(r.customer_deposit) : '',
       status: r.status,
       notes: r.notes || '',
     });
@@ -236,6 +237,7 @@ export default function AdminPurchases() {
       currency: form.currency,
       quoted_price: form.quoted_price ? parseFloat(form.quoted_price) : null,
       actual_cost: form.actual_cost ? parseFloat(form.actual_cost) : null,
+      customer_deposit: form.customer_deposit ? parseFloat(form.customer_deposit) : 0,
       status: form.status,
       notes: form.notes || null,
       user_id: users[0]?.id || '',
@@ -344,6 +346,10 @@ export default function AdminPurchases() {
       render: (v: number) => v != null ? v.toLocaleString() : '—',
     },
     {
+      title: '存款', dataIndex: 'customer_deposit', key: 'deposit', width: 80,
+      render: (v: number) => v ? <span style={{ color: '#1677ff' }}>{v.toLocaleString()}</span> : '—',
+    },
+    {
       title: '已收款', dataIndex: 'total_received', key: 'received', width: 90,
       render: (v: number) => v != null ? <span style={{ color: '#52c41a' }}>{v.toLocaleString()}</span> : '—',
     },
@@ -428,6 +434,7 @@ export default function AdminPurchases() {
           { title: '理论成本', dataIndex: 'tx_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
           { title: '报价', key: 'qp', width: 90, render: (_: any, r: any) => r._showPrice ? (r.quoted_price != null ? r.quoted_price.toLocaleString() : '—') : '' },
           { title: '实际支出', key: 'ac', width: 90, render: (_: any, r: any) => r._showPrice ? (r.actual_cost != null ? r.actual_cost.toLocaleString() : '—') : '' },
+          { title: '存款', key: 'dp', width: 80, render: (_: any, r: any) => r._showPrice && r.customer_deposit ? <span style={{ color: '#1677ff' }}>{r.customer_deposit.toLocaleString()}</span> : '' },
           { title: '利润', key: 'pf', width: 80, render: (_: any, r: any) => r._showPrice && r.profit != null ? <span style={{ color: r.profit >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.profit.toLocaleString()}</span> : '' },
           {
             title: '状态', key: 'st', width: 80,
@@ -598,6 +605,11 @@ export default function AdminPurchases() {
                 placeholder="实际花费" style={{ width: 160 }} />
             </Form.Item>
           </Space>
+          <Form.Item label="客户存款">
+            <InputNumber value={form.customer_deposit ? parseFloat(form.customer_deposit) : undefined}
+              onChange={(v) => setForm({ ...form, customer_deposit: v != null ? String(v) : '' })}
+              placeholder="客户多打暂存的钱" style={{ width: 160 }} min={0} />
+          </Form.Item>
           <Form.Item label="状态">
             <Select
               value={form.status}
@@ -609,12 +621,17 @@ export default function AdminPurchases() {
             <Input.TextArea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
           </Form.Item>
           {/* 预览利润 */}
-          {form.quoted_price && form.actual_cost && (
-            <div style={{ padding: 8, background: '#f6ffed', borderRadius: 4, marginBottom: 12 }}>
-              采购利润 = {parseFloat(form.quoted_price).toLocaleString()} - {parseFloat(form.actual_cost).toLocaleString()} = {' '}
-              <strong style={{ color: (parseFloat(form.quoted_price) - parseFloat(form.actual_cost)) >= 0 ? '#52c41a' : '#ff4d4f' }}>
-                {(parseFloat(form.quoted_price) - parseFloat(form.actual_cost)).toLocaleString()}
-              </strong>
+          {(form.quoted_price || form.actual_cost) && (
+            <div style={{ padding: 8, background: '#f6ffed', borderRadius: 4, marginBottom: 12, fontSize: 13 }}>
+              客户应付款 = {form.quoted_price ? parseFloat(form.quoted_price).toLocaleString() : '?'} + {form.customer_deposit ? parseFloat(form.customer_deposit).toLocaleString() : '0'}（存款） = {' '}
+              <strong>{(parseFloat(form.quoted_price || '0') + parseFloat(form.customer_deposit || '0')).toLocaleString()}</strong>
+              {form.actual_cost && (
+                <span style={{ marginLeft: 16 }}>
+                  采购利润 = <strong style={{ color: (parseFloat(form.quoted_price || '0') - parseFloat(form.actual_cost)) >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                    {(parseFloat(form.quoted_price || '0') - parseFloat(form.actual_cost)).toLocaleString()}
+                  </strong>
+                </span>
+              )}
             </div>
           )}
         </Form>

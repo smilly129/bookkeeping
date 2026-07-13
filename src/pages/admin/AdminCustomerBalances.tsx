@@ -88,12 +88,11 @@ export default function AdminCustomerBalances() {
       .eq('is_deleted', false);
 
     const rows: CustBalance[] = custFilter.map(c => {
-      const custTxs = (txs || []).filter(t => t.customer_id === c.id);
+      const custTxs = (txs || []).filter(t => t.customer_id === c.id && t.business_type !== 'exchange');
       const totalDeposit = custTxs.reduce((s, t) => {
         // 优先用理论成本（人民币），否则用金额
         if (t.theoretical_cost) return s + t.theoretical_cost;
         if (t.type === 'income') return s + (t.amount || 0);
-        if (t.type === 'exchange') return s + (t.to_amount || 0);
         return s;
       }, 0);
 

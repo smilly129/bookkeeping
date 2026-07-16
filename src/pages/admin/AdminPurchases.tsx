@@ -502,11 +502,22 @@ export default function AdminPurchases() {
       <Table
         columns={columns.map(c => c.key === 'shortfall' ? {
           ...c,
-          render: (v: number, r: PurchaseSummary) => {
-            if (v > 1) return <Tag color="error">⚠️ 差 {v.toLocaleString()}</Tag>;
-            if (r.total_received === 0) return <Tag color="default">未打款</Tag>;
-            return <Tag color="success">✓ 已收齐</Tag>;
-          },
+          title: '待补款/操作',
+          width: 160,
+          render: (v: number, r: PurchaseSummary) => (
+            <Space size="small">
+              {v > 1 ? <Tag color="error">⚠️ 差 {v.toLocaleString()}</Tag>
+               : r.total_received === 0 ? <Tag color="default">未打款</Tag>
+               : <Tag color="success">✓ 已收齐</Tag>}
+              <Popconfirm title="确认补款已完成?" onConfirm={async () => {
+                await supabase.from('purchases').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', r.id);
+                message.success('已标记完成');
+                loadData();
+              }}>
+                <Button size="small" type="link" style={{ padding: 0 }}>完成补款</Button>
+              </Popconfirm>
+            </Space>
+          ),
         } : c)}
         dataSource={data.filter(d => d.shortfall > 1 || d.total_received === 0)}
         rowKey="id"

@@ -128,6 +128,29 @@ export default function AdminPurchases() {
       if (filterSp) rows = rows.filter(r => r.salesperson_id === filterSp);
       if (filterCust) rows = rows.filter(r => r.customer_id === filterCust);
       if (filterStatus) rows = rows.filter(r => r.status === filterStatus);
+
+      // 同客户存款池：按日期先后自动抵扣后续采购单
+      const custGroups = new Map<string, PurchaseSummary[]>();
+      rows.forEach(r => {
+        if (!custGroups.has(r.customer_id)) custGroups.set(r.customer_id, []);
+        custGroups.get(r.customer_id)!.push(r);
+      });
+
+      custGroups.forEach((purchases) => {
+        purchases.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        let depositPool = 0;
+        purchases.forEach(p => {
+          depositPool += (p.customer_deposit || 0);
+          // 用存款池抵扣当前采购单的 shortfall
+          if (depositPool > 0 && (p as any).shortfall > 0) {
+            const used = Math.min(depositPool, (p as any).shortfall);
+            (p as any).shortfall = Math.max(0, (p as any).shortfall - used);
+            depositPool -= used;
+            (p as any)._deposit_applied = used;
+          }
+        });
+      });
+
       setData(rows);
     }
 
@@ -346,8 +369,13 @@ export default function AdminPurchases() {
       render: (v: number) => v != null ? v.toLocaleString() : '—',
     },
     {
-      title: '存款', dataIndex: 'customer_deposit', key: 'deposit', width: 80,
-      render: (v: number) => v ? <span style={{ color: '#1677ff' }}>{v.toLocaleString()}</span> : '—',
+      title: '存款', dataIndex: 'customer_deposit', key: 'deposit', width: 100,
+      render: (v: number, r: any) => {
+        if (!v) return '—';
+        if (r._deposit_applied > 0 && r._deposit_applied >= v - 0.01) return <Tag color="default">已使用 {v.toLocaleString()}</Tag>;
+        if (r._deposit_applied > 0) return <span>{v.toLocaleString()} <Tag color="processing" style={{ fontSize: 11 }}>已用{r._deposit_applied.toLocaleString()}</Tag></span>;
+        return <span style={{ color: '#1677ff' }}>{v.toLocaleString()}</span>;
+      },
     },
     {
       title: '已收款', dataIndex: 'total_received', key: 'received', width: 90,
@@ -434,7 +462,11 @@ export default function AdminPurchases() {
           { title: '理论成本', dataIndex: 'tx_cost', key: 'tc', width: 100, render: (v: number) => v != null ? `${v.toLocaleString()} RMB` : '—' },
           { title: '报价', key: 'qp', width: 90, render: (_: any, r: any) => r._showPrice ? (r.quoted_price != null ? r.quoted_price.toLocaleString() : '—') : '' },
           { title: '实际支出', key: 'ac', width: 90, render: (_: any, r: any) => r._showPrice ? (r.actual_cost != null ? r.actual_cost.toLocaleString() : '—') : '' },
-          { title: '存款', key: 'dp', width: 80, render: (_: any, r: any) => r._showPrice && r.customer_deposit ? <span style={{ color: '#1677ff' }}>{r.customer_deposit.toLocaleString()}</span> : '' },
+          { title: '存款', key: 'dp', width: 100, render: (_: any, r: any) => {
+            if (!r._showPrice || !r.customer_deposit) return '';
+            if (r._deposit_applied > 0 && r._deposit_applied >= r.customer_deposit - 0.01) return <Tag color="default">已使用 {r.customer_deposit.toLocaleString()}</Tag>;
+            return <span style={{ color: '#1677ff' }}>{r.customer_deposit.toLocaleString()}</span>;
+          }},
           { title: '利润', key: 'pf', width: 80, render: (_: any, r: any) => r._showPrice && r.profit != null ? <span style={{ color: r.profit >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.profit.toLocaleString()}</span> : '' },
           {
             title: '状态', key: 'st', width: 80,

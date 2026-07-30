@@ -109,13 +109,8 @@ export default function AdminProcurementReconcile() {
       if (r) setReconciliations(r as ProcurementReconciliation[]);
       if (ps) setPurchases(ps);
 
-      // 期初余额：优先从 localStorage 读取，否则从最近对账获取
-      const saved = localStorage.getItem('proc_opening');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setOpeningBalance(parsed.balance || 0);
-        setOpeningDate(parsed.date || '');
-      } else if (r && r.length > 0) {
+      // 期初余额从最近一次对账中获取
+      if (r && r.length > 0) {
         const last = r[0] as ProcurementReconciliation;
         setOpeningBalance(last.opening_balance);
         setOpeningDate(last.reconcile_date);
@@ -1110,14 +1105,26 @@ export default function AdminProcurementReconcile() {
         title="期初余额设置"
         open={openingOpen}
         onCancel={() => setOpeningOpen(false)}
-        onOk={() => {
+        onOk={async () => {
           const bal = parseFloat(openingFormBalance) || 0;
           const date = openingFormDate.format('YYYY-MM-DD');
+          // 存入数据库：如果已有对账记录就更新第一条，没有就新建
+          if (reconciliations.length > 0) {
+            await supabase.from('procurement_reconciliations').update({
+              opening_balance: bal, reconcile_date: date,
+            }).eq('id', reconciliations[0].id);
+          } else {
+            await supabase.from('procurement_reconciliations').insert({
+              opening_balance: bal, reconcile_date: date,
+              system_balance: bal, actual_balance: bal,
+              status: 'matched', submitted_by: user?.id,
+            });
+          }
           setOpeningBalance(bal);
           setOpeningDate(date);
-          localStorage.setItem('proc_opening', JSON.stringify({ balance: bal, date }));
           setOpeningOpen(false);
           message.success('期初余额已设置');
+          loadData();
         }}
       >
         <Form layout="vertical">

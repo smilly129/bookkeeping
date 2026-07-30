@@ -109,8 +109,13 @@ export default function AdminProcurementReconcile() {
       if (r) setReconciliations(r as ProcurementReconciliation[]);
       if (ps) setPurchases(ps);
 
-      // 期初余额从最近一次对账中获取
-      if (r && r.length > 0) {
+      // 期初余额：优先从 localStorage 读取，否则从最近对账获取
+      const saved = localStorage.getItem('proc_opening');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setOpeningBalance(parsed.balance || 0);
+        setOpeningDate(parsed.date || '');
+      } else if (r && r.length > 0) {
         const last = r[0] as ProcurementReconciliation;
         setOpeningBalance(last.opening_balance);
         setOpeningDate(last.reconcile_date);
@@ -1106,8 +1111,11 @@ export default function AdminProcurementReconcile() {
         open={openingOpen}
         onCancel={() => setOpeningOpen(false)}
         onOk={() => {
-          setOpeningBalance(parseFloat(openingFormBalance) || 0);
-          setOpeningDate(openingFormDate.format('YYYY-MM-DD'));
+          const bal = parseFloat(openingFormBalance) || 0;
+          const date = openingFormDate.format('YYYY-MM-DD');
+          setOpeningBalance(bal);
+          setOpeningDate(date);
+          localStorage.setItem('proc_opening', JSON.stringify({ balance: bal, date }));
           setOpeningOpen(false);
           message.success('期初余额已设置');
         }}

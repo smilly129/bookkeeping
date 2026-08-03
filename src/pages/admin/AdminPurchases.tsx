@@ -198,9 +198,11 @@ export default function AdminPurchases() {
         combined.push({ ...p, tx_date: '', tx_currency: '', tx_amount: null, tx_rate: null, tx_cost: null, _txType: '', _showPrice: true });
       }
     }
-    if (filterCust) setCombinedRows(combined.filter(r => r.customer_id === filterCust));
-    else if (filterSp) setCombinedRows(combined.filter(r => r.salesperson_id === filterSp));
-    else setCombinedRows(combined);
+    let filteredCombined = combined;
+    if (filterMonth) filteredCombined = filteredCombined.filter(r => (r.created_at || '').startsWith(filterMonth));
+    if (filterCust) filteredCombined = filteredCombined.filter(r => r.customer_id === filterCust);
+    else if (filterSp) filteredCombined = filteredCombined.filter(r => r.salesperson_id === filterSp);
+    setCombinedRows(filteredCombined);
 
     setLoading(false);
   };
@@ -604,8 +606,9 @@ export default function AdminPurchases() {
           { title: '备注', dataIndex: 'notes', key: 'notes', ellipsis: true, render: (v: string) => v || '—' },
         ]}
         dataSource={(() => {
-          // 只显示未关联的（purchase_id 为 null 且有 business_type）
-          const unlinked = purchaseTxs.filter((t: any) => !t.purchase_id);
+          // 只显示未关联的（purchase_id 为 null）+ 按月份过滤
+          let unlinked = purchaseTxs.filter((t: any) => !t.purchase_id);
+          if (filterMonth) unlinked = unlinked.filter((t: any) => (t.transaction_date || '').startsWith(filterMonth));
           return unlinked;
         })()}
         rowKey="id"

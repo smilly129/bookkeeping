@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Table, Button, Select, Space, Tag, Modal, Form, InputNumber, Input, message, Popconfirm,
+  Table, Button, Select, Space, Tag, Modal, Form, InputNumber, Input, DatePicker, message, Popconfirm,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ExportOutlined } from '@ant-design/icons';
 import { supabase, type Customer, type Salesperson, type PurchaseSummary, CURRENCIES, PURCHASE_STATUSES } from '../../lib/supabase';
@@ -88,6 +88,7 @@ export default function AdminPurchases() {
   const [filterSp, setFilterSp] = useState('');
   const [filterCust, setFilterCust] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterMonth, setFilterMonth] = useState(dayjs().format('YYYY-MM'));
 
   // 基础数据
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
@@ -107,7 +108,7 @@ export default function AdminPurchases() {
 
   useEffect(() => {
     loadData();
-  }, [filterSp, filterCust, filterStatus]);
+  }, [filterSp, filterCust, filterStatus, filterMonth]);
 
   const loadLookups = async () => {
     const [spRes, custRes, userRes] = await Promise.all([
@@ -128,6 +129,7 @@ export default function AdminPurchases() {
       if (filterSp) rows = rows.filter(r => r.salesperson_id === filterSp);
       if (filterCust) rows = rows.filter(r => r.customer_id === filterCust);
       if (filterStatus) rows = rows.filter(r => r.status === filterStatus);
+      if (filterMonth) rows = rows.filter(r => (r.created_at || '').startsWith(filterMonth));
 
       // 同客户存款池：按日期先后自动抵扣后续采购单
       const custGroups = new Map<string, PurchaseSummary[]>();
@@ -490,6 +492,13 @@ export default function AdminPurchases() {
 
       {/* 筛选 */}
       <Space wrap style={{ marginBottom: 16 }}>
+        <DatePicker
+          picker="month"
+          value={dayjs(filterMonth)}
+          onChange={(d) => setFilterMonth(d ? d.format('YYYY-MM') : '')}
+          allowClear={false}
+          style={{ width: 130 }}
+        />
         <Select
           placeholder="按业务员" allowClear style={{ width: 120 }}
           value={filterSp || undefined} onChange={(v) => { setFilterSp(v || ''); setCustBySp(v ? customers.filter(c => c.salesperson_id === v) : []); }}

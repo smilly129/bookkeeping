@@ -441,6 +441,19 @@ export default function AdminPurchases() {
         </Space>
       </div>
 
+      {/* 月份选择 */}
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: 12, gap: 12 }}>
+        <Button size="small" onClick={() => setFilterMonth(dayjs(filterMonth).subtract(1, 'month').format('YYYY-MM'))}>◀ 上月</Button>
+        <DatePicker
+          picker="month"
+          value={dayjs(filterMonth)}
+          onChange={(d) => setFilterMonth(d ? d.format('YYYY-MM') : '')}
+          allowClear={false}
+          style={{ width: 140 }}
+        />
+        <Button size="small" onClick={() => setFilterMonth(dayjs(filterMonth).add(1, 'month').format('YYYY-MM'))}>下月 ▶</Button>
+      </div>
+
       {/* 统计卡片 */}
       <Space wrap style={{ marginBottom: 16 }}>
         <Tag color="blue" style={{ padding: '4px 12px', fontSize: 14 }}>采购利润: {totalProfit >= 0 ? '+' : ''}{totalProfit.toLocaleString()}</Tag>
@@ -492,13 +505,6 @@ export default function AdminPurchases() {
 
       {/* 筛选 */}
       <Space wrap style={{ marginBottom: 16 }}>
-        <DatePicker
-          picker="month"
-          value={dayjs(filterMonth)}
-          onChange={(d) => setFilterMonth(d ? d.format('YYYY-MM') : '')}
-          allowClear={false}
-          style={{ width: 130 }}
-        />
         <Select
           placeholder="按业务员" allowClear style={{ width: 120 }}
           value={filterSp || undefined} onChange={(v) => { setFilterSp(v || ''); setCustBySp(v ? customers.filter(c => c.salesperson_id === v) : []); }}

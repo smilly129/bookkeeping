@@ -124,12 +124,35 @@ export default function AdminPurchases() {
   const loadData = async () => {
     setLoading(true);
     const { data: raw } = await supabase.from('purchase_summary').select('*').order('created_at', { ascending: false });
+
+    // 提前加载关联流水，用于按打款日期筛选
+    const purchaseIds = (raw as PurchaseSummary[] || []).map(p => p.id);
+    let allLinked: any[] = [];
+    if (purchaseIds.length > 0) {
+      const { data } = await supabase.from('transactions')
+        .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id, type')
+        .in('purchase_id', purchaseIds).eq('is_deleted', false)
+        .order('transaction_date', { ascending: false });
+      allLinked = data || [];
+    }
+    // 每个采购单的关联流水日期集合
+    const txDatesMap = new Map<string, string[]>();
+    allLinked.forEach(t => {
+      if (!txDatesMap.has(t.purchase_id)) txDatesMap.set(t.purchase_id, []);
+      txDatesMap.get(t.purchase_id)!.push(t.transaction_date);
+    });
+
     if (raw) {
       let rows = raw as PurchaseSummary[];
       if (filterSp) rows = rows.filter(r => r.salesperson_id === filterSp);
       if (filterCust) rows = rows.filter(r => r.customer_id === filterCust);
       if (filterStatus) rows = rows.filter(r => r.status === filterStatus);
-      if (filterMonth) rows = rows.filter(r => (r.created_at || '').startsWith(filterMonth));
+      if (filterMonth) rows = rows.filter(r => {
+        // 优先用关联流水的打款日期，没有则用创建日期
+        const dates = txDatesMap.get(r.id);
+        if (dates && dates.length > 0) return dates.some(d => (d || '').startsWith(filterMonth));
+        return (r.created_at || '').startsWith(filterMonth);
+      });
 
       // 同客户存款池：按日期先后自动抵扣后续采购单
       const custGroups = new Map<string, PurchaseSummary[]>();
@@ -165,16 +188,6 @@ export default function AdminPurchases() {
     if (txs) setPurchaseTxs(txs);
 
     // 合并采购单 + 流水：一行 = 采购单 + 一笔关联流水
-    const purchaseIds = (raw as PurchaseSummary[] || []).map(p => p.id);
-    let allLinked: any[] = [];
-    if (purchaseIds.length > 0) {
-      const { data } = await supabase.from('transactions')
-        .select('id, transaction_date, currency, amount, exchange_rate, theoretical_cost, purchase_id, type')
-        .in('purchase_id', purchaseIds).eq('is_deleted', false)
-        .order('transaction_date', { ascending: false });
-      allLinked = data || [];
-    }
-
     const linkedMap = new Map<string, any[]>();
     allLinked.forEach(t => {
       if (!linkedMap.has(t.purchase_id)) linkedMap.set(t.purchase_id, []);
@@ -199,7 +212,10 @@ export default function AdminPurchases() {
       }
     }
     let filteredCombined = combined;
-    if (filterMonth) filteredCombined = filteredCombined.filter(r => (r.created_at || '').startsWith(filterMonth));
+    if (filterMonth) filteredCombined = filteredCombined.filter(r => {
+      if (r.tx_date) return (r.tx_date || '').startsWith(filterMonth);
+      return (r.created_at || '').startsWith(filterMonth);
+    });
     if (filterCust) filteredCombined = filteredCombined.filter(r => r.customer_id === filterCust);
     else if (filterSp) filteredCombined = filteredCombined.filter(r => r.salesperson_id === filterSp);
     setCombinedRows(filteredCombined);

@@ -513,8 +513,8 @@ export default function AdminRecords() {
         const inAmt = t.to_amount || t.amount || 0;
         const inCur = t.to_currency || t.currency || '';
         const card = classifyCard(toAcc);
-        // 运费收入: 标了客户(is_freight)的才计
-        if (t.is_freight) {
+        // 运费收入: 标了客户(is_freight)的才计，且备注不以「付」开头
+        if (t.is_freight && !note.startsWith('付')) {
           const person = note || '未备注';
           const fd = getDayFreight(date);
           if (!fd.persons.has(person)) fd.persons.set(person, { rub: 0, usd: 0 });
@@ -686,6 +686,16 @@ export default function AdminRecords() {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = Array.from({ length: 12 }, (_, i) => ({ wch: i === 0 ? 12 : 16 }));
     ws['!merges'] = merges;
+    // 合并单元格居中
+    const centerStyle = { alignment: { horizontal: 'center', vertical: 'center' } };
+    merges.forEach(m => {
+      for (let r = m.s.r; r <= m.e.r; r++) {
+        for (let c = m.s.c; c <= m.e.c; c++) {
+          const addr = XLSX.utils.encode_cell({ r, c });
+          if (ws[addr]) ws[addr].s = centerStyle;
+        }
+      }
+    });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '月度总结');
     XLSX.writeFile(wb, `月度总结_${summaryMonth.format('YYYYMM')}.xlsx`);

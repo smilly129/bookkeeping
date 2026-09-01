@@ -459,7 +459,10 @@ export default function AdminRecords() {
     // 卡总结: { date: { card: { RUB: {in,out}, USD: {in,out} } } }
     const cardMap = new Map<string, Map<string, { rubIn: number; rubOut: number; usdIn: number; usdOut: number }>>();
     // 运费: { date: { persons: { name: {rub, usd} }, customs: { company: {rub, usd} } } }
-    const freightMap = new Map<string, { persons: Map<string, { rub: number; usd: number }>; customs: Map<string, { rub: number; usd: number }> }>();
+    const freightMap = new Map<string, {
+      persons: Map<string, { entries: { rub: number; usd: number; rate?: number }[] }>;
+      customs: Map<string, { rub: number; usd: number }>;
+    }>();
 
     const allDates = new Set<string>();
     const allPersons = new Set<string>();
@@ -518,9 +521,13 @@ export default function AdminRecords() {
         if (t.is_freight && !note.startsWith('付')) {
           const person = note || '未备注';
           const fd = getDayFreight(date);
-          if (!fd.persons.has(person)) fd.persons.set(person, { rub: 0, usd: 0 });
+          if (!fd.persons.has(person)) fd.persons.set(person, { entries: [] });
           const p = fd.persons.get(person)!;
-          if (inCur === 'RUB') p.rub += inAmt; else p.usd += inAmt;
+          if (inCur === 'RUB') {
+            p.entries.push({ rub: inAmt, usd: 0, rate: t.exchange_rate || undefined });
+          } else {
+            p.entries.push({ rub: 0, usd: inAmt });
+          }
           allPersons.add(person);
         } else {
           addCardAmt(date, card, inCur, inAmt, true);
@@ -597,15 +604,22 @@ export default function AdminRecords() {
     let monthRubIn = 0, monthRubOut = 0, monthUsdIn = 0, monthUsdOut = 0;
 
     sortedDates.forEach(date => {
-      const row: any[] = [date];
       let dayRubIn = 0, dayRubOut = 0, dayUsdIn = 0, dayUsdOut = 0;
+      // 先累计收支判断倒挂★
+      ['T卡', 'C卡', '阿尔法卡', '现金'].forEach(card => {
+        const c = getCardData(date, card);
+        if (!c) return;
+        dayRubIn += c.rubIn; dayRubOut += c.rubOut; dayUsdIn += c.usdIn; dayUsdOut += c.usdOut;
+      });
+      const star = (dayRubOut > dayRubIn || dayUsdOut > dayUsdIn) ? '★' : '';
+      const row: any[] = [date + star];
 
       // 收入侧
       const pushIn = (card: string, isRub: boolean) => {
         const c = getCardData(date, card);
         if (!c) { row.push(''); return; }
-        if (isRub) { dayRubIn += c.rubIn; row.push(fmtRub(c.rubIn)); }
-        else { dayUsdIn += c.usdIn; row.push(fmtUsd(c.usdIn)); }
+        if (isRub) row.push(fmtRub(c.rubIn));
+        else row.push(fmtUsd(c.usdIn));
       };
       pushIn('T卡', true);
       pushIn('C卡', true);
@@ -617,8 +631,8 @@ export default function AdminRecords() {
       const pushOut = (card: string, isRub: boolean) => {
         const c = getCardData(date, card);
         if (!c) { row.push(''); return; }
-        if (isRub) { dayRubOut += c.rubOut; row.push(c.rubOut ? '-' + fmtRub(c.rubOut) : ''); }
-        else { dayUsdOut += c.usdOut; row.push(c.usdOut ? '-' + fmtUsd(c.usdOut) : ''); }
+        if (isRub) row.push(c.rubOut ? '-' + fmtRub(c.rubOut) : '');
+        else row.push(c.usdOut ? '-' + fmtUsd(c.usdOut) : '');
       };
       pushOut('T卡', true);
       pushOut('C卡', true);
@@ -678,23 +692,46 @@ export default function AdminRecords() {
       v.rub += rub; v.usd += usd;
     };
 
+    // 人名格显示：44.05万（88.1合5000美金），多笔不同汇率用+连接
+    const fmtPersonCell = (v: { entries: { rub: number; usd: number; rate?: number }[] }): string => {
+      if (!v.entries.length) return '';
+      return v.entries.map(e => {
+        if (e.rub) {
+          const amt = fmtRub(e.rub);
+          if (e.rate) return `${amt}（${e.rate}合${Math.round(e.rub / e.rate)}美金）`;
+          return amt;
+        }
+        return fmtUsd(e.usd);
+      }).join('+');
+    };
+
     sortedDates.forEach(date => {
       const fd = freightMap.get(date);
       if (!fd) return;
-      const row = [date];
       let dRubIn = 0, dRubOut = 0, dUsdIn = 0, dUsdOut = 0;
+      // 先累计收支，判断倒挂★
+      personsList.forEach(p => {
+        const v = fd.persons.get(p);
+        if (!v) return;
+        v.entries.forEach(e => { dRubIn += e.rub; dUsdIn += e.usd; });
+      });
+      customsList.forEach(c => {
+        const v = fd.customs.get(c);
+        if (!v) return;
+        dRubOut += v.rub; dUsdOut += v.usd;
+      });
+      const star = (dRubOut > dRubIn || dUsdOut > dUsdIn) ? '★' : '';
+      const row = [date + star];
       personsList.forEach(p => {
         const v = fd.persons.get(p);
         if (!v) { row.push(''); return; }
-        dRubIn += v.rub; dUsdIn += v.usd;
-        addTotals(fPersonsTotals, p, v.rub, v.usd);
-        row.push(v.rub ? fmtRub(v.rub) : v.usd ? fmtUsd(v.usd) : '');
+        v.entries.forEach(e => addTotals(fPersonsTotals, p, e.rub, e.usd));
+        row.push(fmtPersonCell(v));
       });
       row.push('');
       customsList.forEach(c => {
         const v = fd.customs.get(c);
         if (!v) { row.push(''); return; }
-        dRubOut += v.rub; dUsdOut += v.usd;
         addTotals(fCustomsTotals, c, v.rub, v.usd);
         row.push('-' + (v.rub ? fmtRub(v.rub) : fmtUsd(v.usd)));
       });

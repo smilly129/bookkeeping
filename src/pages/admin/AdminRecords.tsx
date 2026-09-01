@@ -6,6 +6,7 @@ import {
 import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutlined, DownOutlined } from '@ant-design/icons';
 import { supabase, type Transaction, type Account, type Customer, type Salesperson, type CurrencyAlias, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS, BUSINESS_TYPES, RATE_DIRECTIONS } from '../../lib/supabase';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
 import { parseQuickInput } from '../../utils/parseQuickInput';
 
 // 需要做除法的币种（1 RMB = X 外币）
@@ -402,6 +403,248 @@ export default function AdminRecords() {
     message.success('导出成功');
   };
 
+  // ========== 月度总结导出 ==========
+  const [summaryMonth, setSummaryMonth] = useState(dayjs());
+
+  // 卡分类
+  const classifyCard = (accName: string): string => {
+    if (!accName) return '';
+    if (accName.includes('阿尔法')) return '阿尔法卡';
+    if (accName.includes('T卡') || accName === 'T') return 'T卡';
+    if (accName.includes('C卡') || accName === 'C') return 'C卡';
+    if (accName.includes('现金')) return '现金';
+    return accName;
+  };
+
+  // 人名识别：非付xxx、非金额、非业务词
+  const isPersonName = (note: string): boolean => {
+    if (!note) return false;
+    const n = note.trim();
+    if (!n) return false;
+    if (/^付\s*\d+/.test(n)) return false;           // 付568 → 清关
+    if (/买美金|买卢布|借款|换款|手续费|换汇|回款|补款|采购|退款|提现|存款/.test(n)) return false;
+    if (/[A-Za-z]{2,}\d{2,}/.test(n)) return false;   // 客户代号 BF9009
+    return true;
+  };
+
+  const handleExportMonthlySummary = async () => {
+    const monthStart = summaryMonth.startOf('month').format('YYYY-MM-DD');
+    const monthEnd = summaryMonth.endOf('month').format('YYYY-MM-DD');
+
+    const { data: txs } = await supabase.from('transactions').select(`
+      *,
+      from_acc:from_account_id(name),
+      to_acc:to_account_id(name)
+    `).eq('is_deleted', false)
+      .gte('transaction_date', monthStart)
+      .lte('transaction_date', monthEnd)
+      .order('transaction_date', { ascending: true });
+
+    if (!txs || txs.length === 0) { message.warning('该月暂无流水'); return; }
+
+    // ===== 分类聚合 =====
+    // 卡总结: { date: { card: { RUB: {in,out}, USD: {in,out} } } }
+    const cardMap = new Map<string, Map<string, { rubIn: number; rubOut: number; usdIn: number; usdOut: number }>>();
+    // 运费: { date: { persons: { name: {rub, usd} }, customs: { company: {rub, usd} } } }
+    const freightMap = new Map<string, { persons: Map<string, { rub: number; usd: number }>; customs: Map<string, { rub: number; usd: number }> }>();
+
+    const allDates = new Set<string>();
+    const allPersons = new Set<string>();
+    const allCustoms = new Set<string>();
+
+    const getDayFreight = (date: string) => {
+      if (!freightMap.has(date)) freightMap.set(date, { persons: new Map(), customs: new Map() });
+      return freightMap.get(date)!;
+    };
+    const getCardDay = (date: string) => {
+      if (!cardMap.has(date)) cardMap.set(date, new Map());
+      return cardMap.get(date)!;
+    };
+    const addCardAmt = (date: string, card: string, currency: string, amount: number, isIncome: boolean) => {
+      if (!card || !amount) return;
+      const day = getCardDay(date);
+      if (!day.has(card)) day.set(card, { rubIn: 0, rubOut: 0, usdIn: 0, usdOut: 0 });
+      const c = day.get(card)!;
+      const isRUB = currency === 'RUB';
+      if (isIncome) { if (isRUB) c.rubIn += amount; else c.usdIn += amount; }
+      else { if (isRUB) c.rubOut += amount; else c.usdOut += amount; }
+    };
+
+    txs.forEach(t => {
+      const date = (t.transaction_date || '').slice(0, 10);
+      if (!date) return;
+      allDates.add(date);
+      const note = (t.notes || '').trim();
+      const fromAcc = (t as any).from_acc?.name || '';
+      const toAcc = (t as any).to_acc?.name || '';
+
+      // 出账（支出）侧
+      if (t.from_account_id) {
+        const outAmt = t.from_amount || t.amount || 0;
+        const outCur = t.from_currency || t.currency || '';
+        const card = classifyCard(fromAcc);
+        // 清关支出: 付568
+        const customsMatch = note.match(/^付\s*(\d+)/);
+        if (customsMatch) {
+          const company = customsMatch[1];
+          const fd = getDayFreight(date);
+          if (!fd.customs.has(company)) fd.customs.set(company, { rub: 0, usd: 0 });
+          const c = fd.customs.get(company)!;
+          if (outCur === 'RUB') c.rub += outAmt; else c.usd += outAmt;
+          allCustoms.add(company);
+        } else {
+          addCardAmt(date, card, outCur, outAmt, false);
+        }
+      }
+
+      // 入账（收入）侧
+      if (t.to_account_id) {
+        const inAmt = t.to_amount || t.amount || 0;
+        const inCur = t.to_currency || t.currency || '';
+        const card = classifyCard(toAcc);
+        // 运费收入: 人名
+        if (isPersonName(note)) {
+          const fd = getDayFreight(date);
+          if (!fd.persons.has(note)) fd.persons.set(note, { rub: 0, usd: 0 });
+          const p = fd.persons.get(note)!;
+          if (inCur === 'RUB') p.rub += inAmt; else p.usd += inAmt;
+          allPersons.add(note);
+        } else {
+          addCardAmt(date, card, inCur, inAmt, true);
+        }
+      }
+    });
+
+    // ===== 构建 Excel =====
+    const sortedDates = [...allDates].sort();
+    const personsList = [...allPersons];
+    const customsList = [...allCustoms];
+    // 卡列: 收入侧和支出侧对称
+    const inCols = ['收T卡', '收C卡', '收阿尔法卡', '收现金卢布', '收现金美金'];
+    const outCols = ['支T卡', '支C卡', '支阿尔法卡', '支现金卢布', '支现金美金'];
+
+    // 金额显示: 卢布≥10万 缩写 xx万
+    const fmtRub = (v: number): string => {
+      if (v === 0) return '';
+      if (Math.abs(v) >= 100000) return `${+(v / 10000).toFixed(2)}万`;
+      return String(v);
+    };
+    const fmtUsd = (v: number): string => {
+      if (v === 0) return '';
+      return String(v);
+    };
+
+    // 卡收入/支出汇总文本: 收入：xxx卢布+xx万美金
+    const fmtTotal = (rub: number, usd: number): string => {
+      const parts: string[] = [];
+      if (rub) parts.push(`${rub.toLocaleString()}卢布`);
+      if (usd) parts.push(`${+(usd / 10000).toFixed(2)}万美金`);
+      return parts.length > 0 ? parts.join('+') : '0';
+    };
+    // 运费汇总: 收入：103.84万卢布
+    const fmtFreightTotal = (rub: number, usd: number): string => {
+      const parts: string[] = [];
+      if (rub) parts.push(`${+(rub / 10000).toFixed(2)}万卢布`);
+      if (usd) parts.push(`${usd.toLocaleString()}美金`);
+      return parts.length > 0 ? parts.join('+') : '0';
+    };
+
+    const aoa: any[][] = [];
+
+    // 取某天某卡的数据
+    const getCardData = (date: string, card: string) => cardMap.get(date)?.get(card);
+
+    // ===== 块1: 卡总结 =====
+    aoa.push([`${summaryMonth.format('YYYY-MM')} 卡总结`]);
+    aoa.push(['日期', ...inCols, '', ...outCols]);
+
+    let monthRubIn = 0, monthRubOut = 0, monthUsdIn = 0, monthUsdOut = 0;
+
+    sortedDates.forEach(date => {
+      const day = cardMap.get(date);
+      const row: any[] = [date];
+      let dayRubIn = 0, dayRubOut = 0, dayUsdIn = 0, dayUsdOut = 0;
+
+      // 收入侧
+      const pushIn = (card: string, isRub: boolean) => {
+        const c = getCardData(date, card);
+        if (!c) { row.push(''); return; }
+        if (isRub) { dayRubIn += c.rubIn; row.push(fmtRub(c.rubIn)); }
+        else { dayUsdIn += c.usdIn; row.push(fmtUsd(c.usdIn)); }
+      };
+      pushIn('T卡', true);
+      pushIn('C卡', true);
+      pushIn('阿尔法卡', true);
+      pushIn('现金', true);
+      pushIn('现金', false);
+      row.push('');
+      // 支出侧
+      const pushOut = (card: string, isRub: boolean) => {
+        const c = getCardData(date, card);
+        if (!c) { row.push(''); return; }
+        if (isRub) { dayRubOut += c.rubOut; row.push(c.rubOut ? '-' + fmtRub(c.rubOut) : ''); }
+        else { dayUsdOut += c.usdOut; row.push(c.usdOut ? '-' + fmtUsd(c.usdOut) : ''); }
+      };
+      pushOut('T卡', true);
+      pushOut('C卡', true);
+      pushOut('阿尔法卡', true);
+      pushOut('现金', true);
+      pushOut('现金', false);
+
+      monthRubIn += dayRubIn; monthRubOut += dayRubOut; monthUsdIn += dayUsdIn; monthUsdOut += dayUsdOut;
+      aoa.push(row);
+      aoa.push([`${date.slice(5)}合计`, `收入：${fmtTotal(dayRubIn, dayUsdIn)}`, '', '', '', '', '', '', '', `支出：${fmtTotal(dayRubOut, dayUsdOut)}`, '']);
+    });
+
+    // 月总计
+    aoa.push(['月总计', `收入：${fmtTotal(monthRubIn, monthUsdIn)}`, '', '', '', '', '', '', '', `支出：${fmtTotal(monthRubOut, monthUsdOut)}`, '']);
+    aoa.push([]);
+    aoa.push([]);
+
+    // ===== 块2: 运费总结 =====
+    aoa.push([`${summaryMonth.format('YYYY-MM')} 运费总结`, '', '', '', '', '', '', '', '', '', '']);
+    const freightHeader = ['日期'];
+    personsList.forEach(p => freightHeader.push(`收${p}`));
+    freightHeader.push('');
+    customsList.forEach(c => freightHeader.push(`支付${c}`));
+    aoa.push(freightHeader);
+
+    let fRubIn = 0, fRubOut = 0, fUsdIn = 0, fUsdOut = 0;
+
+    sortedDates.forEach(date => {
+      const fd = freightMap.get(date);
+      if (!fd) return;
+      const row = [date];
+      let dRubIn = 0, dRubOut = 0, dUsdIn = 0, dUsdOut = 0;
+      personsList.forEach(p => {
+        const v = fd.persons.get(p);
+        if (!v) { row.push(''); return; }
+        dRubIn += v.rub; dUsdIn += v.usd;
+        row.push(v.rub ? fmtRub(v.rub) : v.usd ? fmtUsd(v.usd) : '');
+      });
+      row.push('');
+      customsList.forEach(c => {
+        const v = fd.customs.get(c);
+        if (!v) { row.push(''); return; }
+        dRubOut += v.rub; dUsdOut += v.usd;
+        row.push('-' + (v.rub ? fmtRub(v.rub) : fmtUsd(v.usd)));
+      });
+      fRubIn += dRubIn; fRubOut += dRubOut; fUsdIn += dUsdIn; fUsdOut += dUsdOut;
+      aoa.push(row);
+      aoa.push([`${date.slice(5)}合计`, `收入：${fmtFreightTotal(dRubIn, dUsdIn)}`, '', '', '', '', '', '', '', `支出：${fmtFreightTotal(dRubOut, dUsdOut)}`, '']);
+    });
+
+    aoa.push(['月总计', `收入：${fmtFreightTotal(fRubIn, fUsdIn)}`, '', '', '', '', '', '', '', `支出：${fmtFreightTotal(fRubOut, fUsdOut)}`, '']);
+
+    // 生成 Excel
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = Array.from({ length: 12 }, (_, i) => ({ wch: i === 0 ? 12 : 16 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '月度总结');
+    XLSX.writeFile(wb, `月度总结_${summaryMonth.format('YYYYMM')}.xlsx`);
+    message.success('导出成功');
+  };
+
   // 快速录入：解析文本
   const handleQuickParse = () => {
     if (!quickInputText.trim()) return;
@@ -571,6 +814,14 @@ export default function AdminRecords() {
             setAddAccounts([]);
           }}>新增记录</Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
+          <DatePicker
+            picker="month"
+            value={summaryMonth}
+            onChange={(d) => setSummaryMonth(d || dayjs())}
+            allowClear={false}
+            style={{ width: 120 }}
+          />
+          <Button type="primary" icon={<ExportOutlined />} onClick={handleExportMonthlySummary}>导出月度总结</Button>
         </Space>
       </div>
 

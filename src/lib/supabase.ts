@@ -62,6 +62,7 @@ export interface Transaction {
   rate_direction?: 'divide' | 'multiply';
   theoretical_cost?: number;
   purchase_id?: string;
+  is_freight?: boolean;
 }
 
 export interface Reconciliation {

@@ -577,16 +577,21 @@ export default function AdminRecords() {
 
     // ===== 块1: 卡总结 =====
     const merges: any[] = [];
+    const headerRows: number[] = [];   // 表头行(灰底)
+    const boldRows: number[] = [];     // 加粗行(月总计/明细)
     const cardBlockStart = aoa.length;
     aoa.push([`${summaryMonth.format('YYYY-MM')} 卡总结`]);
+    headerRows.push(cardBlockStart);
     merges.push({ s: { r: cardBlockStart, c: 0 }, e: { r: cardBlockStart, c: 11 } }); // 标题跨12列
     // 分组表头: 日期 | 收入(5列) | 空 | 支出(5列)
     aoa.push(['日期', '收入', '', '', '', '', '', '支出', '', '', '', '']);
+    headerRows.push(cardBlockStart + 1);
     merges.push({ s: { r: cardBlockStart + 1, c: 1 }, e: { r: cardBlockStart + 1, c: 5 } }); // 收入
     merges.push({ s: { r: cardBlockStart + 1, c: 7 }, e: { r: cardBlockStart + 1, c: 11 } }); // 支出
     merges.push({ s: { r: cardBlockStart + 1, c: 0 }, e: { r: cardBlockStart + 2, c: 0 } }); // 日期跨两行
     // 子表头
     aoa.push(['', ...inCols, '', ...outCols]);
+    headerRows.push(cardBlockStart + 2);
 
     let monthRubIn = 0, monthRubOut = 0, monthUsdIn = 0, monthUsdOut = 0;
 
@@ -627,11 +632,14 @@ export default function AdminRecords() {
       aoa.push([`${date.slice(5)}合计`, `收入：${fmtTotal(dayRubIn, dayUsdIn)}`, '', '', '', '', '', `支出：${fmtTotal(dayRubOut, dayUsdOut)}`, '', '', '', '']);
       merges.push({ s: { r: totalRowIdx, c: 1 }, e: { r: totalRowIdx, c: 6 } });
       merges.push({ s: { r: totalRowIdx, c: 7 }, e: { r: totalRowIdx, c: 11 } });
+      // 留白行
+      aoa.push([]);
     });
 
     // 月总计
     const monthTotalIdx = aoa.length;
     aoa.push(['月总计', `收入：${fmtTotal(monthRubIn, monthUsdIn)}`, '', '', '', '', '', `支出：${fmtTotal(monthRubOut, monthUsdOut)}`, '', '', '', '']);
+    boldRows.push(monthTotalIdx);
     merges.push({ s: { r: monthTotalIdx, c: 1 }, e: { r: monthTotalIdx, c: 6 } });
     merges.push({ s: { r: monthTotalIdx, c: 7 }, e: { r: monthTotalIdx, c: 11 } });
     aoa.push([]);
@@ -641,10 +649,12 @@ export default function AdminRecords() {
     const freightBlockStart = aoa.length;
     const freightCols = 1 + personsList.length + 1 + Math.max(customsList.length, 1); // 日期+人名+空+清关
     aoa.push([`${summaryMonth.format('YYYY-MM')} 运费总结`]);
+    headerRows.push(freightBlockStart);
     merges.push({ s: { r: freightBlockStart, c: 0 }, e: { r: freightBlockStart, c: freightCols - 1 } });
     // 分组表头
     const groupHeader = ['日期', '收入', ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', '支出', ...Array(Math.max(customsList.length - 1, 0)).fill('')];
     aoa.push(groupHeader);
+    headerRows.push(freightBlockStart + 1);
     merges.push({ s: { r: freightBlockStart + 1, c: 1 }, e: { r: freightBlockStart + 1, c: 1 + personsList.length - 1 } });
     merges.push({ s: { r: freightBlockStart + 1, c: 2 + personsList.length }, e: { r: freightBlockStart + 1, c: freightCols - 1 } });
     merges.push({ s: { r: freightBlockStart + 1, c: 0 }, e: { r: freightBlockStart + 2, c: 0 } });
@@ -655,8 +665,17 @@ export default function AdminRecords() {
     customsList.forEach(c => freightHeader.push(`支付${c}`));
     if (customsList.length === 0) freightHeader.push('支付');
     aoa.push(freightHeader);
+    headerRows.push(freightBlockStart + 2);
 
     let fRubIn = 0, fRubOut = 0, fUsdIn = 0, fUsdOut = 0;
+    // 月度明细累计
+    const fCustomsTotals = new Map<string, { rub: number; usd: number }>();
+    const fPersonsTotals = new Map<string, { rub: number; usd: number }>();
+    const addTotals = (m: Map<string, { rub: number; usd: number }>, key: string, rub: number, usd: number) => {
+      if (!m.has(key)) m.set(key, { rub: 0, usd: 0 });
+      const v = m.get(key)!;
+      v.rub += rub; v.usd += usd;
+    };
 
     sortedDates.forEach(date => {
       const fd = freightMap.get(date);
@@ -667,6 +686,7 @@ export default function AdminRecords() {
         const v = fd.persons.get(p);
         if (!v) { row.push(''); return; }
         dRubIn += v.rub; dUsdIn += v.usd;
+        addTotals(fPersonsTotals, p, v.rub, v.usd);
         row.push(v.rub ? fmtRub(v.rub) : v.usd ? fmtUsd(v.usd) : '');
       });
       row.push('');
@@ -674,6 +694,7 @@ export default function AdminRecords() {
         const v = fd.customs.get(c);
         if (!v) { row.push(''); return; }
         dRubOut += v.rub; dUsdOut += v.usd;
+        addTotals(fCustomsTotals, c, v.rub, v.usd);
         row.push('-' + (v.rub ? fmtRub(v.rub) : fmtUsd(v.usd)));
       });
       if (customsList.length === 0) row.push('');
@@ -684,30 +705,110 @@ export default function AdminRecords() {
       aoa.push([`${date.slice(5)}合计`, `收入：${fmtFreightTotal(dRubIn, dUsdIn)}`, ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', `支出：${fmtFreightTotal(dRubOut, dUsdOut)}`, ...Array(Math.max(customsList.length - 1, 0)).fill('')]);
       merges.push({ s: { r: ftIdx, c: 1 }, e: { r: ftIdx, c: 1 + personsList.length - 1 } });
       merges.push({ s: { r: ftIdx, c: 2 + personsList.length }, e: { r: ftIdx, c: freightCols - 1 } });
+      // 留白行
+      aoa.push([]);
     });
 
     const fMonthIdx = aoa.length;
     aoa.push(['月总计', `收入：${fmtFreightTotal(fRubIn, fUsdIn)}`, ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', `支出：${fmtFreightTotal(fRubOut, fUsdOut)}`, ...Array(Math.max(customsList.length - 1, 0)).fill('')]);
+    boldRows.push(fMonthIdx);
     merges.push({ s: { r: fMonthIdx, c: 1 }, e: { r: fMonthIdx, c: 1 + personsList.length - 1 } });
     merges.push({ s: { r: fMonthIdx, c: 2 + personsList.length }, e: { r: fMonthIdx, c: freightCols - 1 } });
+
+    // 月度明细：清关公司逐家、客户逐人
+    const detailRow = (label: string, values: string[], isIncome: boolean) => {
+      const idx = aoa.length;
+      aoa.push([label, ...values]);
+      boldRows.push(idx);
+      return idx;
+    };
+    // 清关支出明细
+    detailRow('本月清关公司支出合计：' + fmtFreightTotal(fRubOut, fUsdOut), [], false);
+    customsList.forEach(c => {
+      const v = fCustomsTotals.get(c);
+      if (!v) return;
+      detailRow(`  付${c}：-${v.rub ? fmtFreightTotal(v.rub, 0) : fmtFreightTotal(0, v.usd)}`, [], false);
+    });
+    // 客户收入明细
+    detailRow('本月客户运费收入合计：' + fmtFreightTotal(fRubIn, fUsdIn), [], true);
+    personsList.forEach(p => {
+      const v = fPersonsTotals.get(p);
+      if (!v) return;
+      detailRow(`  ${p}：+${v.rub ? fmtFreightTotal(v.rub, 0) : fmtFreightTotal(0, v.usd)}`, [], true);
+    });
 
     // 生成 Excel
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = Array.from({ length: 12 }, (_, i) => ({ wch: i === 0 ? 12 : 16 }));
     ws['!merges'] = merges;
-    // 合并单元格居中：纯值单元格要先转成 cell 对象才能挂样式
-    const centerStyle = { alignment: { horizontal: 'center', vertical: 'center' } };
+
+    // 样式工具：纯值单元格先转 cell 对象再挂样式（font 深合并）
+    const styleCell = (addr: string, style: any) => {
+      const cell = ws[addr];
+      if (!cell) return;
+      if (cell && typeof cell === 'object' && cell.t !== undefined) {
+        cell.s = { ...(cell.s || {}), ...style, font: { ...(cell.s?.font || {}), ...(style.font || {}) } };
+      } else {
+        ws[addr] = { t: typeof cell === 'number' ? 'n' : 's', v: cell, s: style };
+      }
+    };
+    const centerStyle: any = { alignment: { horizontal: 'center', vertical: 'center' } };
+    const headerStyle: any = { ...centerStyle, fill: { fgColor: { rgb: 'D9D9D9' } }, font: { bold: true } };
+    const boldStyle: any = { font: { bold: true } };
+    const blueStyle: any = { font: { color: { rgb: '1677FF' } } };
+    const redStyle: any = { font: { color: { rgb: 'FF4D4F' } } };
+    const thinBorder = { style: 'thin', color: { rgb: 'BFBFBF' } };
+    const borderStyle: any = { border: { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder } };
+
+    // 表头灰底
+    headerRows.forEach(r => {
+      for (let c = 0; c < 12; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (ws[addr]) styleCell(addr, headerStyle);
+      }
+    });
+    // 合并单元格居中
     merges.forEach(m => {
       for (let r = m.s.r; r <= m.e.r; r++) {
         for (let c = m.s.c; c <= m.e.c; c++) {
           const addr = XLSX.utils.encode_cell({ r, c });
-          const cell = ws[addr];
-          if (cell && typeof cell === 'object' && cell.t !== undefined) {
-            cell.s = centerStyle;
-          } else if (cell !== undefined) {
-            ws[addr] = { t: typeof cell === 'number' ? 'n' : 's', v: cell, s: centerStyle };
-          }
+          if (ws[addr]) styleCell(addr, centerStyle);
         }
+      }
+    });
+    // 收入蓝/支出红 + 全表边框：遍历每个数据行
+    const dataRowCount = aoa.length;
+    for (let r = 0; r < dataRowCount; r++) {
+      const row = aoa[r];
+      const isCardBlock = r >= cardBlockStart && r < freightBlockStart;
+      const isFreightBlock = r >= freightBlockStart;
+      const isHeaderRow = headerRows.includes(r);
+      for (let c = 0; c < 12; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (!ws[addr]) continue;
+        // 边框
+        if (row && row.length > c && row[c] !== '' && row[c] !== undefined && row[c] !== null) {
+          styleCell(addr, borderStyle);
+        }
+        if (isHeaderRow) continue;
+        // 颜色
+        if (isCardBlock) {
+          if (c >= 1 && c <= 5) styleCell(addr, blueStyle);      // 收入列
+          else if (c >= 7 && c <= 11) styleCell(addr, redStyle); // 支出列
+        }
+        if (isFreightBlock) {
+          const personsColsEnd = 1 + personsList.length - 1;
+          const customsColsStart = 2 + personsList.length;
+          if (c >= 1 && c <= personsColsEnd) styleCell(addr, blueStyle);
+          else if (c >= customsColsStart) styleCell(addr, redStyle);
+        }
+      }
+    }
+    // 加粗行（放最后，保留已设的颜色）
+    boldRows.forEach(r => {
+      for (let c = 0; c < 12; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (ws[addr]) styleCell(addr, boldStyle);
       }
     });
     const wb = XLSX.utils.book_new();

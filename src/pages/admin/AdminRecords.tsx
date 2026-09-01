@@ -7,6 +7,7 @@ import { SearchOutlined, ExportOutlined, DeleteOutlined, EditOutlined, PlusOutli
 import { supabase, type Transaction, type Account, type Customer, type Salesperson, type CurrencyAlias, CURRENCIES, ACCOUNT_TYPES, TRANSFER_DIRECTIONS, BUSINESS_TYPES, RATE_DIRECTIONS } from '../../lib/supabase';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { parseQuickInput } from '../../utils/parseQuickInput';
 
 // 需要做除法的币种（1 RMB = X 外币）
@@ -737,46 +738,43 @@ export default function AdminRecords() {
       detailRow(`  ${p}：+${v.rub ? fmtFreightTotal(v.rub, 0) : fmtFreightTotal(0, v.usd)}`, [], true);
     });
 
-    // 生成 Excel
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = Array.from({ length: 12 }, (_, i) => ({ wch: i === 0 ? 12 : 16 }));
-    ws['!merges'] = merges;
+    // 生成 Excel（exceljs：完整支持样式）
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('月度总结');
+    aoa.forEach(row => ws.addRow(row));
+    ws.getColumn(1).width = 14;
+    for (let c = 2; c <= 12; c++) ws.getColumn(c).width = 16;
 
-    // 样式工具：纯值单元格先转 cell 对象再挂样式（font 深合并）
-    const styleCell = (addr: string, style: any) => {
-      const cell = ws[addr];
-      if (!cell) return;
-      if (cell && typeof cell === 'object' && cell.t !== undefined) {
-        cell.s = { ...(cell.s || {}), ...style, font: { ...(cell.s?.font || {}), ...(style.font || {}) } };
-      } else {
-        ws[addr] = { t: typeof cell === 'number' ? 'n' : 's', v: cell, s: style };
-      }
+    // 样式工具（先全部设好样式，最后再合并，保证合并后主格样式保留）
+    const thin: any = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+    const borderAll = { top: thin, bottom: thin, left: thin, right: thin };
+    const setStyle = (r: number, c: number, style: any) => {
+      const cell = ws.getCell(r, c);
+      if (style.alignment) cell.alignment = style.alignment;
+      if (style.fill) cell.fill = style.fill;
+      if (style.font) cell.font = { ...(cell.font || {}), ...style.font };
+      if (style.border) cell.border = style.border;
     };
-    const centerStyle: any = { alignment: { horizontal: 'center', vertical: 'center' } };
-    const headerStyle: any = { ...centerStyle, fill: { fgColor: { rgb: 'D9D9D9' } }, font: { bold: true } };
-    const boldStyle: any = { font: { bold: true } };
-    const blueStyle: any = { font: { color: { rgb: '1677FF' } } };
-    const redStyle: any = { font: { color: { rgb: 'FF4D4F' } } };
-    const thinBorder = { style: 'thin', color: { rgb: 'BFBFBF' } };
-    const borderStyle: any = { border: { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder } };
 
-    // 表头灰底
+    // 表头灰底加粗
     headerRows.forEach(r => {
       for (let c = 0; c < 12; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        if (ws[addr]) styleCell(addr, headerStyle);
+        setStyle(r + 1, c + 1, {
+          alignment: { horizontal: 'center', vertical: 'middle' },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } },
+          font: { bold: true },
+        });
       }
     });
-    // 合并单元格居中
+    // 合并区域居中
     merges.forEach(m => {
       for (let r = m.s.r; r <= m.e.r; r++) {
         for (let c = m.s.c; c <= m.e.c; c++) {
-          const addr = XLSX.utils.encode_cell({ r, c });
-          if (ws[addr]) styleCell(addr, centerStyle);
+          setStyle(r + 1, c + 1, { alignment: { horizontal: 'center', vertical: 'middle' } });
         }
       }
     });
-    // 收入蓝/支出红 + 全表边框：遍历每个数据行
+    // 数据行: 边框 + 收入蓝/支出红
     const dataRowCount = aoa.length;
     for (let r = 0; r < dataRowCount; r++) {
       const row = aoa[r];
@@ -784,36 +782,41 @@ export default function AdminRecords() {
       const isFreightBlock = r >= freightBlockStart;
       const isHeaderRow = headerRows.includes(r);
       for (let c = 0; c < 12; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        if (!ws[addr]) continue;
-        // 边框
-        if (row && row.length > c && row[c] !== '' && row[c] !== undefined && row[c] !== null) {
-          styleCell(addr, borderStyle);
+        const hasValue = row && row.length > c && row[c] !== '' && row[c] !== undefined && row[c] !== null;
+        if (!hasValue) continue;
+        const style: any = { border: borderAll };
+        if (!isHeaderRow) {
+          if (isCardBlock) {
+            if (c >= 1 && c <= 5) style.font = { color: { argb: 'FF1677FF' } };
+            else if (c >= 7 && c <= 11) style.font = { color: { argb: 'FFFF4D4F' } };
+          }
+          if (isFreightBlock) {
+            const personsColsEnd = 1 + personsList.length - 1;
+            const customsColsStart = 2 + personsList.length;
+            if (c >= 1 && c <= personsColsEnd) style.font = { color: { argb: 'FF1677FF' } };
+            else if (c >= customsColsStart) style.font = { color: { argb: 'FFFF4D4F' } };
+          }
         }
-        if (isHeaderRow) continue;
-        // 颜色
-        if (isCardBlock) {
-          if (c >= 1 && c <= 5) styleCell(addr, blueStyle);      // 收入列
-          else if (c >= 7 && c <= 11) styleCell(addr, redStyle); // 支出列
-        }
-        if (isFreightBlock) {
-          const personsColsEnd = 1 + personsList.length - 1;
-          const customsColsStart = 2 + personsList.length;
-          if (c >= 1 && c <= personsColsEnd) styleCell(addr, blueStyle);
-          else if (c >= customsColsStart) styleCell(addr, redStyle);
-        }
+        setStyle(r + 1, c + 1, style);
       }
     }
-    // 加粗行（放最后，保留已设的颜色）
+    // 加粗行
     boldRows.forEach(r => {
       for (let c = 0; c < 12; c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        if (ws[addr]) styleCell(addr, boldStyle);
+        setStyle(r + 1, c + 1, { font: { bold: true } });
       }
     });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '月度总结');
-    XLSX.writeFile(wb, `月度总结_${summaryMonth.format('YYYYMM')}.xlsx`);
+    // 最后合并（0-based → exceljs 1-based）
+    merges.forEach(m => ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1));
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `月度总结_${summaryMonth.format('YYYYMM')}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
     message.success('导出成功');
   };
 

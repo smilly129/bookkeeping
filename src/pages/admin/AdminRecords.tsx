@@ -495,9 +495,9 @@ export default function AdminRecords() {
         const outAmt = t.from_amount || t.amount || 0;
         const outCur = t.from_currency || t.currency || '';
         const card = classifyCard(fromAcc);
-        // 清关支出: 备注以「付」开头（付568/付707/付贝加尔）
-        if (note.startsWith('付')) {
-          const company = note.replace(/^付/, '').trim() || '未知';
+        // 清关支出: 只有备注恰好是「付+纯数字」才算（付568）；「付568落地费」不算
+        if (/^付\d+$/.test(note)) {
+          const company = note.replace(/^付/, '').trim();
           const fd = getDayFreight(date);
           if (!fd.customs.has(company)) fd.customs.set(company, { rub: 0, usd: 0 });
           const c = fd.customs.get(company)!;
@@ -530,7 +530,16 @@ export default function AdminRecords() {
     // ===== 构建 Excel =====
     const sortedDates = [...allDates].sort();
     const personsList = [...allPersons];
-    const customsList = [...allCustoms];
+    // 清关公司白名单排序: 白名单内的按固定顺序，白名单外的按出现顺序排后面
+    const customsWhitelist = ['568', '6789', '29', '193', '599', '809', '906', '509'];
+    const customsList = [...allCustoms].sort((a, b) => {
+      const ia = customsWhitelist.indexOf(a);
+      const ib = customsWhitelist.indexOf(b);
+      if (ia >= 0 && ib >= 0) return ia - ib;
+      if (ia >= 0) return -1;
+      if (ib >= 0) return 1;
+      return 0;
+    });
     // 卡列: 收入侧和支出侧对称
     const inCols = ['收T卡', '收C卡', '收阿尔法卡', '收现金卢布', '收现金美金'];
     const outCols = ['支T卡', '支C卡', '支阿尔法卡', '支现金卢布', '支现金美金'];
@@ -686,13 +695,18 @@ export default function AdminRecords() {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = Array.from({ length: 12 }, (_, i) => ({ wch: i === 0 ? 12 : 16 }));
     ws['!merges'] = merges;
-    // 合并单元格居中
+    // 合并单元格居中：纯值单元格要先转成 cell 对象才能挂样式
     const centerStyle = { alignment: { horizontal: 'center', vertical: 'center' } };
     merges.forEach(m => {
       for (let r = m.s.r; r <= m.e.r; r++) {
         for (let c = m.s.c; c <= m.e.c; c++) {
           const addr = XLSX.utils.encode_cell({ r, c });
-          if (ws[addr]) ws[addr].s = centerStyle;
+          const cell = ws[addr];
+          if (cell && typeof cell === 'object' && cell.t !== undefined) {
+            cell.s = centerStyle;
+          } else if (cell !== undefined) {
+            ws[addr] = { t: typeof cell === 'number' ? 'n' : 's', v: cell, s: centerStyle };
+          }
         }
       }
     });

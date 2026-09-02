@@ -458,10 +458,10 @@ export default function AdminRecords() {
     // ===== 分类聚合 =====
     // 卡总结: { date: { card: { RUB: {in,out}, USD: {in,out} } } }
     const cardMap = new Map<string, Map<string, { rubIn: number; rubOut: number; usdIn: number; usdOut: number }>>();
-    // 运费: { date: { persons: { name: {rub, usd} }, customs: { company: {rub, usd} } } }
+    // 运费: { date: { persons: { name: {entries} }, customs: { company: {entries} } } }
     const freightMap = new Map<string, {
       persons: Map<string, { entries: { rub: number; usd: number; rate?: number }[] }>;
-      customs: Map<string, { rub: number; usd: number }>;
+      customs: Map<string, { entries: { rub: number; usd: number; rate?: number }[] }>;
     }>();
 
     const allDates = new Set<string>();
@@ -503,9 +503,13 @@ export default function AdminRecords() {
         if (/^付\d+$/.test(note)) {
           const company = note.replace(/^付/, '').trim();
           const fd = getDayFreight(date);
-          if (!fd.customs.has(company)) fd.customs.set(company, { rub: 0, usd: 0 });
+          if (!fd.customs.has(company)) fd.customs.set(company, { entries: [] });
           const c = fd.customs.get(company)!;
-          if (outCur === 'RUB') c.rub += outAmt; else c.usd += outAmt;
+          if (outCur === 'RUB') {
+            c.entries.push({ rub: outAmt, usd: 0, rate: t.exchange_rate || undefined });
+          } else {
+            c.entries.push({ rub: 0, usd: outAmt });
+          }
           allCustoms.add(company);
         } else {
           addCardAmt(date, card, outCur, outAmt, false);
@@ -692,17 +696,26 @@ export default function AdminRecords() {
       v.rub += rub; v.usd += usd;
     };
 
-    // 人名格显示：44.05万（88.1合5000美金），多笔不同汇率用+连接
-    const fmtPersonCell = (v: { entries: { rub: number; usd: number; rate?: number }[] }): string => {
-      if (!v.entries.length) return '';
-      return v.entries.map(e => {
-        if (e.rub) {
-          const amt = fmtRub(e.rub);
-          if (e.rate) return `${amt}（${e.rate}合${Math.round(e.rub / e.rate)}美金）`;
-          return amt;
+    // 人名/清关格显示：同天同对象多笔合并成总数 13.5万（88.1合1532美金），合美金取整
+    const fmtEntriesCell = (entries: { rub: number; usd: number; rate?: number }[]): string => {
+      if (!entries.length) return '';
+      let rub = 0, usd = 0;
+      const rubEntries = entries.filter(e => e.rub);
+      rubEntries.forEach(e => { rub += e.rub; });
+      entries.forEach(e => { usd += e.usd; });
+      const parts: string[] = [];
+      if (rub) {
+        const amt = fmtRub(rub);
+        // 只有所有卢布笔汇率一致才标注
+        const rates = rubEntries.map(e => e.rate).filter((r): r is number => !!r);
+        if (rates.length === rubEntries.length && rates.length > 0 && rates.every(r => r === rates[0])) {
+          parts.push(`${amt}（${rates[0]}合${Math.round(rub / rates[0])}美金）`);
+        } else {
+          parts.push(amt);
         }
-        return fmtUsd(e.usd);
-      }).join('+');
+      }
+      if (usd) parts.push(fmtUsd(usd));
+      return parts.join('+');
     };
 
     sortedDates.forEach(date => {
@@ -718,7 +731,7 @@ export default function AdminRecords() {
       customsList.forEach(c => {
         const v = fd.customs.get(c);
         if (!v) return;
-        dRubOut += v.rub; dUsdOut += v.usd;
+        v.entries.forEach(e => { dRubOut += e.rub; dUsdOut += e.usd; });
       });
       const star = (dRubOut > dRubIn || dUsdOut > dUsdIn) ? '★' : '';
       const row = [date + star];
@@ -726,14 +739,14 @@ export default function AdminRecords() {
         const v = fd.persons.get(p);
         if (!v) { row.push(''); return; }
         v.entries.forEach(e => addTotals(fPersonsTotals, p, e.rub, e.usd));
-        row.push(fmtPersonCell(v));
+        row.push(fmtEntriesCell(v.entries));
       });
       row.push('');
       customsList.forEach(c => {
         const v = fd.customs.get(c);
         if (!v) { row.push(''); return; }
-        addTotals(fCustomsTotals, c, v.rub, v.usd);
-        row.push('-' + (v.rub ? fmtRub(v.rub) : fmtUsd(v.usd)));
+        v.entries.forEach(e => addTotals(fCustomsTotals, c, e.rub, e.usd));
+        row.push('-' + fmtEntriesCell(v.entries));
       });
       if (customsList.length === 0) row.push('');
       fRubIn += dRubIn; fRubOut += dRubOut; fUsdIn += dUsdIn; fUsdOut += dUsdOut;

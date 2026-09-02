@@ -496,11 +496,12 @@ export default function AdminRecords() {
       const fromAcc = (t as any).from_acc?.name || '';
       const toAcc = (t as any).to_acc?.name || '';
 
-      // 出账（支出）侧
+      // 出账（支出）侧 —— 卡总结记录全部支出；清关支出另进运费总结
       if (t.from_account_id) {
         const outAmt = t.from_amount || t.amount || 0;
         const outCur = t.from_currency || t.currency || '';
         const card = classifyCard(fromAcc);
+        addCardAmt(date, card, outCur, outAmt, false);
         // 清关支出: 只有备注恰好是「付+纯数字」才算（付568）；「付568落地费」不算
         if (/^付\d+$/.test(note)) {
           const company = note.replace(/^付/, '').trim();
@@ -513,16 +514,15 @@ export default function AdminRecords() {
             c.entries.push({ rub: 0, usd: outAmt });
           }
           allCustoms.add(company);
-        } else {
-          addCardAmt(date, card, outCur, outAmt, false);
         }
       }
 
-      // 入账（收入）侧
+      // 入账（收入）侧 —— 卡总结记录全部收入；标客户运费收入另进运费总结
       if (t.to_account_id) {
         const inAmt = t.to_amount || t.amount || 0;
         const inCur = t.to_currency || t.currency || '';
         const card = classifyCard(toAcc);
+        addCardAmt(date, card, inCur, inAmt, true);
         // 运费收入: 标了客户(is_freight)的才计，且备注不以「付」开头
         if (t.is_freight && !note.startsWith('付')) {
           const person = note || '未备注';
@@ -535,8 +535,6 @@ export default function AdminRecords() {
             p.entries.push({ rub: 0, usd: inAmt });
           }
           allPersons.add(person);
-        } else {
-          addCardAmt(date, card, inCur, inAmt, true);
         }
       }
     });

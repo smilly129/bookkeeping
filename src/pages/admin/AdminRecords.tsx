@@ -437,6 +437,8 @@ export default function AdminRecords() {
     if (accName.includes('T卡') || accName === 'T') return 'T卡';
     if (accName.includes('C卡') || accName === 'C') return 'C卡';
     if (accName.includes('现金')) return '现金';
+    // 现金账户名可能是「国外卢布」「国外美金」
+    if (accName.includes('国外') && (accName.includes('卢布') || accName.includes('美金'))) return '现金';
     return accName;
   };
 

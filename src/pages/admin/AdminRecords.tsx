@@ -442,6 +442,11 @@ export default function AdminRecords() {
     return accName;
   };
 
+  // 命名清关公司: 备注写「付超光速」也算清关支出
+  const NAMED_CUSTOMS = ['超光速'];
+  const isCustomsNote = (note: string): boolean =>
+    /^付\d+$/.test(note) || NAMED_CUSTOMS.some(n => note === '付' + n);
+
   const handleExportMonthlySummary = async () => {
     const monthStart = summaryMonth.startOf('month').format('YYYY-MM-DD');
     const monthEnd = summaryMonth.endOf('month').format('YYYY-MM-DD');
@@ -502,8 +507,8 @@ export default function AdminRecords() {
         const outCur = t.from_currency || t.currency || '';
         const card = classifyCard(fromAcc);
         addCardAmt(date, card, outCur, outAmt, false);
-        // 清关支出: 只有备注恰好是「付+纯数字」才算（付568）；「付568落地费」不算
-        if (/^付\d+$/.test(note)) {
+        // 清关支出: 备注恰好是「付+纯数字」（付568）或「付+命名公司」（付超光速）；「付568落地费」不算
+        if (isCustomsNote(note)) {
           const company = note.replace(/^付/, '').trim();
           const fd = getDayFreight(date);
           if (!fd.customs.has(company)) fd.customs.set(company, { entries: [] });
@@ -543,7 +548,7 @@ export default function AdminRecords() {
     const sortedDates = [...allDates].sort();
     const personsList = [...allPersons];
     // 清关公司白名单排序: 白名单内的按固定顺序，白名单外的按出现顺序排后面
-    const customsWhitelist = ['568', '6789', '29', '193', '599', '809', '906', '509'];
+    const customsWhitelist = ['568', '6789', '29', '193', '599', '809', '906', '509', ...NAMED_CUSTOMS];
     const customsList = [...allCustoms].sort((a, b) => {
       const ia = customsWhitelist.indexOf(a);
       const ib = customsWhitelist.indexOf(b);
@@ -665,22 +670,30 @@ export default function AdminRecords() {
     aoa.push([]);
 
     // ===== 块2: 运费总结 =====
+    // 列: 0=日期(收入侧) 1..incomeCols=收客户 incomeCols+1=空 incomeCols+2=日期(支出侧) incomeCols+3..=支付清关
     const freightBlockStart = aoa.length;
-    const freightCols = 1 + personsList.length + 1 + Math.max(customsList.length, 1); // 日期+人名+空+清关
+    const incomeCols = Math.max(personsList.length, 1);
+    const customsCols = Math.max(customsList.length, 1);
+    const dateCol2 = incomeCols + 2;
+    const expenseColStart = incomeCols + 3;
+    const freightCols = 1 + incomeCols + 1 + 1 + customsCols;
     aoa.push([`${summaryMonth.format('YYYY-MM')} 运费总结`]);
     headerRows.push(freightBlockStart);
     merges.push({ s: { r: freightBlockStart, c: 0 }, e: { r: freightBlockStart, c: freightCols - 1 } });
-    // 分组表头
-    const groupHeader = ['日期', '收入', ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', '支出', ...Array(Math.max(customsList.length - 1, 0)).fill('')];
+    // 分组表头: 两侧各自带日期列，日期列跨两行
+    const groupHeader = ['日期', '收入', ...Array(incomeCols - 1).fill(''), '', '日期', '支出', ...Array(customsCols - 1).fill('')];
     aoa.push(groupHeader);
     headerRows.push(freightBlockStart + 1);
-    merges.push({ s: { r: freightBlockStart + 1, c: 1 }, e: { r: freightBlockStart + 1, c: 1 + personsList.length - 1 } });
-    merges.push({ s: { r: freightBlockStart + 1, c: 2 + personsList.length }, e: { r: freightBlockStart + 1, c: freightCols - 1 } });
+    merges.push({ s: { r: freightBlockStart + 1, c: 1 }, e: { r: freightBlockStart + 1, c: incomeCols } });
+    merges.push({ s: { r: freightBlockStart + 1, c: expenseColStart }, e: { r: freightBlockStart + 1, c: freightCols - 1 } });
     merges.push({ s: { r: freightBlockStart + 1, c: 0 }, e: { r: freightBlockStart + 2, c: 0 } });
+    merges.push({ s: { r: freightBlockStart + 1, c: dateCol2 }, e: { r: freightBlockStart + 2, c: dateCol2 } });
     // 子表头
     const freightHeader = [''];
     personsList.forEach(p => freightHeader.push(`收${p}`));
-    freightHeader.push('');
+    if (personsList.length === 0) freightHeader.push('');
+    freightHeader.push('');   // 空列
+    freightHeader.push('');   // 日期(支出侧)
     customsList.forEach(c => freightHeader.push(`支付${c}`));
     if (customsList.length === 0) freightHeader.push('支付');
     aoa.push(freightHeader);
@@ -734,6 +747,7 @@ export default function AdminRecords() {
         v.entries.forEach(e => { dRubOut += e.rub; dUsdOut += e.usd; });
       });
       const star = (dRubOut > dRubIn || dUsdOut > dUsdIn) ? '★' : '';
+      // 第一行: 当天日期行，两侧各自带日期
       const row = [date + star];
       personsList.forEach(p => {
         const v = fd.persons.get(p);
@@ -741,7 +755,9 @@ export default function AdminRecords() {
         v.entries.forEach(e => addTotals(fPersonsTotals, p, e.rub, e.usd));
         row.push(fmtEntriesCell(v.entries));
       });
-      row.push('');
+      if (personsList.length === 0) row.push('');
+      row.push('');               // 空列
+      row.push(date + star);      // 支出侧日期
       customsList.forEach(c => {
         const v = fd.customs.get(c);
         if (!v) { row.push(''); return; }
@@ -751,20 +767,23 @@ export default function AdminRecords() {
       if (customsList.length === 0) row.push('');
       fRubIn += dRubIn; fRubOut += dRubOut; fUsdIn += dUsdIn; fUsdOut += dUsdOut;
       aoa.push(row);
-      // 当日合计
-      const ftIdx = aoa.length;
-      aoa.push([`${date.slice(5)}合计`, `收入：${fmtFreightTotal(dRubIn, dUsdIn)}`, ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', `支出：${fmtFreightTotal(dRubOut, dUsdOut)}`, ...Array(Math.max(customsList.length - 1, 0)).fill('')]);
-      merges.push({ s: { r: ftIdx, c: 1 }, e: { r: ftIdx, c: 1 + personsList.length - 1 } });
-      merges.push({ s: { r: ftIdx, c: 2 + personsList.length }, e: { r: ftIdx, c: freightCols - 1 } });
+      // 第二行: 收入/支出总结，放日期列下单个单元格，不合并
+      aoa.push([
+        `收入：${fmtFreightTotal(dRubIn, dUsdIn)}`,
+        ...Array(incomeCols).fill(''),
+        '',
+        `支出：${fmtFreightTotal(dRubOut, dUsdOut)}`,
+        ...Array(customsCols).fill(''),
+      ]);
       // 留白行
       aoa.push([]);
     });
 
     const fMonthIdx = aoa.length;
-    aoa.push(['月总计', `收入：${fmtFreightTotal(fRubIn, fUsdIn)}`, ...Array(Math.max(personsList.length - 1, 0)).fill(''), '', `支出：${fmtFreightTotal(fRubOut, fUsdOut)}`, ...Array(Math.max(customsList.length - 1, 0)).fill('')]);
+    aoa.push(['月总计', `收入：${fmtFreightTotal(fRubIn, fUsdIn)}`, ...Array(incomeCols - 1).fill(''), '', '月总计', `支出：${fmtFreightTotal(fRubOut, fUsdOut)}`, ...Array(customsCols - 1).fill('')]);
     boldRows.push(fMonthIdx);
-    merges.push({ s: { r: fMonthIdx, c: 1 }, e: { r: fMonthIdx, c: 1 + personsList.length - 1 } });
-    merges.push({ s: { r: fMonthIdx, c: 2 + personsList.length }, e: { r: fMonthIdx, c: freightCols - 1 } });
+    merges.push({ s: { r: fMonthIdx, c: 1 }, e: { r: fMonthIdx, c: incomeCols } });
+    merges.push({ s: { r: fMonthIdx, c: expenseColStart }, e: { r: fMonthIdx, c: freightCols - 1 } });
 
     // 月度明细：清关公司逐家、客户逐人
     const detailRow = (label: string, values: string[], isIncome: boolean) => {
@@ -792,8 +811,12 @@ export default function AdminRecords() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('月度总结');
     aoa.forEach(row => ws.addRow(row));
-    ws.getColumn(1).width = 14;
-    for (let c = 2; c <= 12; c++) ws.getColumn(c).width = 16;
+    const maxCols = Math.max(12, ...aoa.map(r => r.length));
+    ws.getColumn(1).width = 20;
+    ws.getColumn(dateCol2 + 1).width = 20; // 两个日期列加宽，容纳「收入：xxx卢布」单格
+    for (let c = 2; c <= maxCols; c++) {
+      if (c !== dateCol2 + 1) ws.getColumn(c).width = 16;
+    }
 
     // 样式工具（先全部设好样式，最后再合并，保证合并后主格样式保留）
     const thin: any = { style: 'thin', color: { argb: 'FFBFBFBF' } };
@@ -808,7 +831,7 @@ export default function AdminRecords() {
 
     // 表头灰底加粗
     headerRows.forEach(r => {
-      for (let c = 0; c < 12; c++) {
+      for (let c = 0; c < maxCols; c++) {
         setStyle(r + 1, c + 1, {
           alignment: { horizontal: 'center', vertical: 'middle' },
           fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } },
@@ -831,7 +854,7 @@ export default function AdminRecords() {
       const isCardBlock = r >= cardBlockStart && r < freightBlockStart;
       const isFreightBlock = r >= freightBlockStart;
       const isHeaderRow = headerRows.includes(r);
-      for (let c = 0; c < 12; c++) {
+      for (let c = 0; c < maxCols; c++) {
         const hasValue = row && row.length > c && row[c] !== '' && row[c] !== undefined && row[c] !== null;
         if (!hasValue) continue;
         const style: any = { border: borderAll };
@@ -841,10 +864,9 @@ export default function AdminRecords() {
             else if (c >= 7 && c <= 11) style.font = { color: { argb: 'FFFF4D4F' } };
           }
           if (isFreightBlock) {
-            const personsColsEnd = 1 + personsList.length - 1;
-            const customsColsStart = 2 + personsList.length;
-            if (c >= 1 && c <= personsColsEnd) style.font = { color: { argb: 'FF1677FF' } };
-            else if (c >= customsColsStart) style.font = { color: { argb: 'FFFF4D4F' } };
+            const val = typeof row[c] === 'string' ? row[c] : '';
+            if ((c >= 1 && c <= incomeCols) || val.startsWith('收入：')) style.font = { color: { argb: 'FF1677FF' } };
+            else if (c >= expenseColStart || val.startsWith('支出：')) style.font = { color: { argb: 'FFFF4D4F' } };
           }
         }
         setStyle(r + 1, c + 1, style);
@@ -852,7 +874,7 @@ export default function AdminRecords() {
     }
     // 加粗行
     boldRows.forEach(r => {
-      for (let c = 0; c < 12; c++) {
+      for (let c = 0; c < maxCols; c++) {
         setStyle(r + 1, c + 1, { font: { bold: true } });
       }
     });

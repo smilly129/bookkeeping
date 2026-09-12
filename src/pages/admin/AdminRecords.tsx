@@ -190,6 +190,7 @@ export default function AdminRecords() {
   const [filterAccountId, setFilterAccountId] = useState('');
   const [allAccounts, setAllAccounts] = useState<{ id: string; name: string; currency: string; user_id: string }[]>([]);
   const [filterCustomer, setFilterCustomer] = useState('');
+  const [filterName, setFilterName] = useState(''); // 按备注人名搜索
 
   // 业务管理模块相关
   const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
@@ -252,6 +253,9 @@ export default function AdminRecords() {
     if (filterCustomer) {
       query = query.eq('customer_id', filterCustomer);
     }
+    if (filterName) {
+      query = query.ilike('notes', `%${filterName}%`);
+    }
 
     const { data: txData } = await query;
     if (txData) {
@@ -294,7 +298,7 @@ export default function AdminRecords() {
       setData(filtered);
     }
     setLoading(false);
-  }, [filterType, filterCurrency, filterDateRange, filterUser, filterCustomer]);
+  }, [filterType, filterCurrency, filterDateRange, filterUser, filterCustomer, filterName]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -443,9 +447,11 @@ export default function AdminRecords() {
   };
 
   // 命名清关公司: 备注写「付超光速」也算清关支出
-  const NAMED_CUSTOMS = ['超光速'];
+  const NAMED_CUSTOMS = ['超光速', 'A177'];
   const isCustomsNote = (note: string): boolean =>
-    /^付\d+$/.test(note) || NAMED_CUSTOMS.some(n => note === '付' + n);
+    /^付\d+$/.test(note) || NAMED_CUSTOMS.some(n => note === '付' + n)
+    // A177 允许带后缀（如「付A177 汇率82」），但含「落地费」的不算
+    || (/^付A177/.test(note) && !note.includes('落地费'));
 
   const handleExportMonthlySummary = async () => {
     const monthStart = summaryMonth.startOf('month').format('YYYY-MM-DD');
@@ -474,6 +480,20 @@ export default function AdminRecords() {
     const allDates = new Set<string>();
     const allPersons = new Set<string>();
     const allCustoms = new Set<string>();
+
+    // 每日明细标注: 借款/取卡/买美金/还借款
+    const dayAnnot = new Map<string, {
+      loanIn: number;                                 // 借款收入(卢布)
+      takeCards: { label: string; rub: number; usd: number }[]; // 取卡入现金
+      buyUsd: { usd: number; rate?: number }[];       // 买美金
+      repayLoan: number;                              // 还借款支出(卢布)
+    }>();
+    const getDayAnnot = (date: string) => {
+      if (!dayAnnot.has(date)) dayAnnot.set(date, { loanIn: 0, takeCards: [], buyUsd: [], repayLoan: 0 });
+      return dayAnnot.get(date)!;
+    };
+    // 卡简称: 阿尔法卡 → A卡
+    const shortCard = (accName: string) => accName === '阿尔法卡' ? 'A卡' : accName;
 
     const getDayFreight = (date: string) => {
       if (!freightMap.has(date)) freightMap.set(date, { persons: new Map(), customs: new Map() });
@@ -507,9 +527,11 @@ export default function AdminRecords() {
         const outCur = t.from_currency || t.currency || '';
         const card = classifyCard(fromAcc);
         if (t.type !== 'transfer') addCardAmt(date, card, outCur, outAmt, false);
-        // 清关支出: 备注恰好是「付+纯数字」（付568）或「付+命名公司」（付超光速）；「付568落地费」不算
+        // 还借款支出标注
+        if (outCur === 'RUB' && note.includes('还借款')) getDayAnnot(date).repayLoan += outAmt;
+        // 清关支出: 备注恰好是「付+纯数字」（付568）或「付+命名公司」（付超光速/付A177）；「付568落地费」不算
         if (isCustomsNote(note)) {
-          const company = note.replace(/^付/, '').trim();
+          const company = /^付A177/.test(note) ? 'A177' : note.replace(/^付/, '').trim();
           const fd = getDayFreight(date);
           if (!fd.customs.has(company)) fd.customs.set(company, { entries: [] });
           const c = fd.customs.get(company)!;
@@ -527,7 +549,18 @@ export default function AdminRecords() {
         const inAmt = t.to_amount || t.amount || 0;
         const inCur = t.to_currency || t.currency || '';
         const card = classifyCard(toAcc);
-        if (t.type !== 'transfer') addCardAmt(date, card, inCur, inAmt, true);
+        // 取卡: 卡→现金的转款，只计入现金侧收入并标注
+        const isTakeCard = t.type === 'transfer' && card === '现金' && note.includes('取');
+        if (t.type !== 'transfer' || isTakeCard) addCardAmt(date, card, inCur, inAmt, true);
+        if (isTakeCard) {
+          getDayAnnot(date).takeCards.push({ label: '取' + shortCard(fromAcc), rub: inCur === 'RUB' ? inAmt : 0, usd: inCur === 'USD' ? inAmt : 0 });
+        }
+        // 借款收入标注
+        if (t.type === 'income' && inCur === 'RUB' && note.includes('借款')) getDayAnnot(date).loanIn += inAmt;
+        // 买美金标注
+        if (t.type === 'exchange' && inCur === 'USD' && note.includes('买')) {
+          getDayAnnot(date).buyUsd.push({ usd: inAmt, rate: t.exchange_rate || undefined });
+        }
         // 运费收入: 标了客户(is_freight)的才计，且备注不以「付」开头
         if (t.is_freight && !note.startsWith('付')) {
           const person = note || '未备注';
@@ -571,6 +604,8 @@ export default function AdminRecords() {
       if (v === 0) return '';
       return String(v);
     };
+    // 标注用金额: 统一万格式 250万 / 36.03万
+    const fmtWan = (v: number): string => `${+(v / 10000).toFixed(2)}万`;
 
     // 卡收入/支出汇总文本: 收入：xxx卢布+xx万美金（无千分位逗号）
     const fmtTotal = (rub: number, usd: number): string => {
@@ -651,9 +686,40 @@ export default function AdminRecords() {
 
       monthRubIn += dayRubIn; monthRubOut += dayRubOut; monthUsdIn += dayUsdIn; monthUsdOut += dayUsdOut;
       aoa.push(row);
-      // 当日合计行
+      // 当日合计行（带明细标注: 借款/取卡/买美金/还借款）
+      const annot = dayAnnot.get(date);
+      const incomeParts: string[] = [];
+      if (dayRubIn) {
+        let ann = '';
+        if (annot) {
+          const annParts: string[] = [];
+          if (annot.loanIn) annParts.push(`借款${fmtWan(annot.loanIn)}`);
+          annot.takeCards.filter(x => x.rub).forEach(x => annParts.push(`${x.label}${fmtWan(x.rub)}`));
+          if (annParts.length) ann = `（${annParts.join('+')}）`;
+        }
+        incomeParts.push(`${dayRubIn}卢布${ann}`);
+      }
+      if (dayUsdIn) {
+        let ann = '';
+        if (annot) {
+          const annParts: string[] = [];
+          annot.buyUsd.forEach(b => annParts.push(`买${fmtWan(b.usd)}美金${b.rate || ''}`));
+          annot.takeCards.filter(x => x.usd).forEach(x => annParts.push(`${x.label}${fmtWan(x.usd)}美金`));
+          if (annParts.length) ann = `（${annParts.join('+')}）`;
+        }
+        incomeParts.push(`${+(dayUsdIn / 10000).toFixed(2)}万美金${ann}`);
+      }
+      const incomeText = `收入：${incomeParts.length ? incomeParts.join('+') : '0'}`;
+      const expenseParts: string[] = [];
+      if (dayRubOut) {
+        let ann = '';
+        if (annot && annot.repayLoan) ann = `（还借款${fmtWan(annot.repayLoan)}）`;
+        expenseParts.push(`${dayRubOut}卢布${ann}`);
+      }
+      if (dayUsdOut) expenseParts.push(`${+(dayUsdOut / 10000).toFixed(2)}万美金`);
+      const expenseText = `支出：${expenseParts.length ? expenseParts.join('+') : '0'}`;
       const totalRowIdx = aoa.length;
-      aoa.push([`${date.slice(5)}合计`, `收入：${fmtTotal(dayRubIn, dayUsdIn)}`, '', '', '', '', '', `支出：${fmtTotal(dayRubOut, dayUsdOut)}`, '', '', '', '']);
+      aoa.push([`${date.slice(5)}合计`, incomeText, '', '', '', '', '', expenseText, '', '', '', '']);
       merges.push({ s: { r: totalRowIdx, c: 1 }, e: { r: totalRowIdx, c: 6 } });
       merges.push({ s: { r: totalRowIdx, c: 7 }, e: { r: totalRowIdx, c: 11 } });
       // 留白行
@@ -1188,6 +1254,12 @@ export default function AdminRecords() {
         <DatePicker.RangePicker
           value={filterDateRange}
           onChange={(dates) => { if (dates && dates[0] && dates[1]) setFilterDateRange([dates[0], dates[1]]); }}
+        />
+        <Input
+          placeholder="按备注人名搜索" allowClear style={{ width: 160 }}
+          value={filterName}
+          onChange={(e) => setFilterName(e.target.value)}
+          onPressEnter={loadData}
         />
         <Button icon={<SearchOutlined />} type="primary" onClick={loadData}>搜索</Button>
       </Space>

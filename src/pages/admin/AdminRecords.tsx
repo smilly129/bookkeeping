@@ -720,6 +720,7 @@ export default function AdminRecords() {
       const expenseText = `支出：${expenseParts.length ? expenseParts.join('+') : '0'}`;
       const totalRowIdx = aoa.length;
       aoa.push([`${date.slice(5)}合计`, incomeText, '', '', '', '', '', expenseText, '', '', '', '']);
+      boldRows.push(totalRowIdx); // 每日收入/支出总结加粗
       merges.push({ s: { r: totalRowIdx, c: 1 }, e: { r: totalRowIdx, c: 6 } });
       merges.push({ s: { r: totalRowIdx, c: 7 }, e: { r: totalRowIdx, c: 11 } });
       // 留白行
@@ -834,6 +835,7 @@ export default function AdminRecords() {
       fRubIn += dRubIn; fRubOut += dRubOut; fUsdIn += dUsdIn; fUsdOut += dUsdOut;
       aoa.push(row);
       // 第二行: 收入/支出总结，放日期列下单个单元格，不合并
+      const fDaySumIdx = aoa.length;
       aoa.push([
         `收入：${fmtFreightTotal(dRubIn, dUsdIn)}`,
         ...Array(incomeCols).fill(''),
@@ -841,6 +843,7 @@ export default function AdminRecords() {
         `支出：${fmtFreightTotal(dRubOut, dUsdOut)}`,
         ...Array(customsCols).fill(''),
       ]);
+      boldRows.push(fDaySumIdx); // 每日收入/支出总结加粗
       // 留白行
       aoa.push([]);
     });

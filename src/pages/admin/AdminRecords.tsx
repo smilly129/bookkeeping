@@ -964,6 +964,7 @@ export default function AdminRecords() {
 
   // ========== 对账表格导出（现金总结 + 卡总结，两个文件） ==========
   const handleExportLedger = async () => {
+    try {
     const start = ledgerRange[0].format('YYYY-MM-DD');
     const end = ledgerRange[1].format('YYYY-MM-DD');
     const days: string[] = [];
@@ -1165,23 +1166,20 @@ export default function AdminRecords() {
           if (r.t === 'date') {
             cell.font = { bold: true, size: 16 };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
-            ws.mergeCells(idx + 1, 1, idx + 1, r.vals.length);
           } else if (r.t === 'header') {
             cell.font = { bold: true, size: 14 };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
           } else if (r.t === 'open' || r.t === 'total') {
             cell.font = { bold: true, size: 14 };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-          } else if (r.t === 'data') {
-            cell.font = { size: 14 };
-            if (isNum && v < 0) cell.font = { size: 14, color: { argb: 'FFCC0000' } };
-            else if (isNum && v > 0) cell.font = { size: 14, color: { argb: 'FF008000' } };
           } else {
             cell.font = { size: 14 };
             if (isNum && v < 0) cell.font = { size: 14, color: { argb: 'FFCC0000' } };
             else if (isNum && v > 0) cell.font = { size: 14, color: { argb: 'FF008000' } };
           }
         }
+        // 合并要在样式设置完之后做，且整行只合并一次
+        if (r.t === 'date') ws.mergeCells(idx + 1, 1, idx + 1, r.vals.length);
       });
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1197,6 +1195,10 @@ export default function AdminRecords() {
     await downloadWorkbook(cashRows, `现金总结_${rangeStr}.xlsx`, [26, 14, 12, 12]);
     await downloadWorkbook(cardRows, `卡总结_${rangeStr}.xlsx`, [30, ...cardCols.map(() => 14)]);
     message.success('已导出 现金总结 和 卡总结 两个文件');
+    } catch (e: any) {
+      console.error('对账表格导出失败', e);
+      message.error('导出失败：' + (e?.message || '未知错误，请刷新后重试'));
+    }
   };
 
   // 快速录入：解析文本

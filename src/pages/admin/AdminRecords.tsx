@@ -1149,9 +1149,7 @@ export default function AdminRecords() {
     // ===== 生成 Excel 样式工具 =====
     const thin: any = { style: 'thin', color: { argb: 'FFBFBFBF' } };
     const borderAll = { top: thin, bottom: thin, left: thin, right: thin };
-    const downloadWorkbook = async (rows: { t: string; vals: any[] }[], fileName: string, colWidths: number[]) => {
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Sheet1');
+    const fillSheet = (ws: ExcelJS.Worksheet, rows: { t: string; vals: any[] }[], colWidths: number[]) => {
       rows.forEach(r => r.vals.length ? ws.addRow(r.vals) : ws.addRow([]));
       colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
       rows.forEach((r, idx) => {
@@ -1181,20 +1179,22 @@ export default function AdminRecords() {
         // 合并要在样式设置完之后做，且整行只合并一次
         if (r.t === 'date') ws.mergeCells(idx + 1, 1, idx + 1, r.vals.length);
       });
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      link.click();
-      URL.revokeObjectURL(url);
     };
 
     const rangeStr = `${start.replace(/-/g, '')}-${end.slice(5).replace(/-/g, '')}`;
-    await downloadWorkbook(cashRows, `现金总结_${rangeStr}.xlsx`, [26, 14, 12, 12]);
-    await downloadWorkbook(cardRows, `卡总结_${rangeStr}.xlsx`, [30, ...cardCols.map(() => 14)]);
-    message.success('已导出 现金总结 和 卡总结 两个文件');
+    // 一个文件，两个工作表
+    const wb = new ExcelJS.Workbook();
+    fillSheet(wb.addWorksheet('现金总结'), cashRows, [26, 14, 12, 12]);
+    fillSheet(wb.addWorksheet('卡总结'), cardRows, [30, ...cardCols.map(() => 14)]);
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `对账表格_${rangeStr}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+    message.success('导出成功');
     } catch (e: any) {
       console.error('对账表格导出失败', e);
       message.error('导出失败：' + (e?.message || '未知错误，请刷新后重试'));

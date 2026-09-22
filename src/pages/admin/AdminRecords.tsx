@@ -433,6 +433,7 @@ export default function AdminRecords() {
 
   // ========== 月度总结导出 ==========
   const [summaryMonth, setSummaryMonth] = useState(dayjs());
+  const [ledgerRange, setLedgerRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().startOf('month'), dayjs()]);
 
   // 卡分类
   const classifyCard = (accName: string): string => {
@@ -961,6 +962,243 @@ export default function AdminRecords() {
     message.success('导出成功');
   };
 
+  // ========== 对账表格导出（现金总结 + 卡总结，两个文件） ==========
+  const handleExportLedger = async () => {
+    const start = ledgerRange[0].format('YYYY-MM-DD');
+    const end = ledgerRange[1].format('YYYY-MM-DD');
+    const days: string[] = [];
+    for (let d = dayjs(start); d.isBefore(dayjs(end).add(1, 'day')); d = d.add(1, 'day')) {
+      days.push(d.format('YYYY-MM-DD'));
+    }
+
+    // 拉取账户和全部流水（分页）
+    const { data: accounts } = await supabase.from('accounts').select('id, name, currency, account_type, initial_balance');
+    if (!accounts) { message.error('加载账户失败'); return; }
+    const allTxs: any[] = [];
+    for (let i = 0; ; i += 1000) {
+      const { data } = await supabase.from('transactions').select('*').eq('is_deleted', false)
+        .order('transaction_date', { ascending: true }).range(i, i + 999);
+      if (!data || data.length === 0) break;
+      allTxs.push(...data);
+      if (data.length < 1000) break;
+    }
+    if (allTxs.length === 0) { message.warning('暂无流水'); return; }
+
+    const accMap = new Map(accounts.map(a => [a.id, a]));
+    const accName = (id: string | null | undefined) => id ? accMap.get(id)?.name || '' : '';
+    const cashRUB = accounts.find(a => a.name === '国外卢布');
+    const cashUSD = accounts.find(a => a.name === '国外美金');
+    const fixedCards = ['T卡', 'C卡', '阿尔法卡', '门卡', '王皓卡'];
+    const weekday = '日一二三四五六';
+    const dateLabel = (day: string) => `${Number(day.slice(5, 7))}月${Number(day.slice(8, 10))}日（周${weekday[dayjs(day).day()]}）`;
+
+    // 区间内有流水的其他国际卡自动加列
+    const extraCards = new Set<string>();
+    allTxs.forEach(t => {
+      const d = (t.transaction_date || '').slice(0, 10);
+      if (d < start || d > end) return;
+      [t.from_account_id, t.to_account_id].forEach(id => {
+        if (!id) return;
+        const a = accMap.get(id);
+        if (!a || fixedCards.includes(a.name) || a.name === cashRUB?.name || a.name === cashUSD?.name) return;
+        if ((a.currency === 'RUB' || a.currency === 'USD') && a.account_type === 'international_card') extraCards.add(a.name);
+      });
+    });
+    const cardCols = [...fixedCards, ...extraCards];
+
+    // 某账户区间前的净流水（用于首日原存）
+    const preFlow = (accId: string | undefined) => {
+      if (!accId) return 0;
+      let sum = 0;
+      allTxs.forEach(t => {
+        if ((t.transaction_date || '').slice(0, 10) >= start) return;
+        if (t.from_account_id === accId) sum -= (t.from_amount || t.amount || 0);
+        if (t.to_account_id === accId) sum += (t.to_amount || t.amount || 0);
+      });
+      return sum;
+    };
+
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+
+    // ===== 构建行数据 =====
+    // 现金总结行: { t: 'date'|'header'|'cust'|'open'|'data'|'total', vals, cat? }
+    const cashRows: { t: string; vals: any[]; day?: string }[] = [];
+    const cardRows: { t: string; vals: any[]; day?: string }[] = [];
+    let rubBal = (cashRUB?.initial_balance || 0) + preFlow(cashRUB?.id);
+    let usdBal = (cashUSD?.initial_balance || 0) + preFlow(cashUSD?.id);
+    const cardBal = new Map<string, number>();
+    cardCols.forEach(n => {
+      const a = accounts.find(x => x.name === n);
+      cardBal.set(n, (a?.initial_balance || 0) + preFlow(a?.id));
+    });
+
+    days.forEach(day => {
+      const dayTxs = allTxs.filter(t => (t.transaction_date || '').slice(0, 10) === day);
+
+      // ---------- 现金总结 ----------
+      cashRows.push({ t: 'date', vals: [dateLabel(day), '', '', ''], day });
+      cashRows.push({ t: 'blank', vals: [] });
+      cashRows.push({ t: 'header', vals: ['欠款', '客户', '万卢布', '美金'] });
+      // 客户收款: 现金账户上标了客户的收入，按人名合并
+      const custMap = new Map<string, { rub: number; usd: number }>();
+      dayTxs.forEach(t => {
+        const toId = t.to_account_id;
+        if (!toId || (toId !== cashRUB?.id && toId !== cashUSD?.id)) return;
+        if (t.type !== 'income' && t.type !== 'exchange') return;
+        if (!t.is_freight || ((t.notes || '').trim()).startsWith('付')) return;
+        const person = (t.notes || '').trim() || '未备注';
+        const inCur = t.to_currency || t.currency || '';
+        const inAmt = t.to_amount || t.amount || 0;
+        if (!custMap.has(person)) custMap.set(person, { rub: 0, usd: 0 });
+        const c = custMap.get(person)!;
+        if (inCur === 'USD') c.usd += inAmt; else c.rub += inAmt;
+      });
+      [...custMap.keys()].forEach(person => {
+        const c = custMap.get(person)!;
+        cashRows.push({ t: 'cust', vals: ['', person, c.rub ? round2(c.rub / 10000) : '', c.usd ? Math.round(c.usd) : ''] });
+        rubBal += c.rub; usdBal += c.usd;
+      });
+      cashRows.push({ t: 'blank', vals: [] });
+      // 原箱存
+      cashRows.push({ t: 'open', vals: ['原箱存', '', round2(rubBal / 10000), Math.round(usdBal)] });
+      // 分类行（顺序: 取卡 借款 业务员收 买美金 付清关 还借款 库房费 退客户赔偿 其他）
+      const cats: { order: number; label: string; label2: string; rub: number; usd: number }[] = [];
+      const isCashId = (id: string | null | undefined) => id === cashRUB?.id || id === cashUSD?.id;
+      dayTxs.forEach(t => {
+        const note = (t.notes || '').trim();
+        const fromId = t.from_account_id, toId = t.to_account_id;
+        if (!isCashId(fromId) && !isCashId(toId)) return;
+        const push = (order: number, label: string, label2: string, rub: number, usd: number) =>
+          cats.push({ order, label, label2, rub, usd });
+        const toCash = isCashId(toId);
+        const fromCash = isCashId(fromId);
+        const inCur = t.to_currency || t.currency || '';
+        const outCur = t.from_currency || t.currency || '';
+        // 换汇: 现金卢布→现金美金 买美金
+        if (t.type === 'exchange' && fromCash && toCash && outCur === 'RUB' && inCur === 'USD') {
+          push(4, `买美金${t.exchange_rate || ''}`, '', -(t.from_amount || 0), t.to_amount || 0);
+          return;
+        }
+        if (t.type === 'transfer' && toCash && note.includes('取')) {
+          const amt = t.to_amount || t.amount || 0;
+          push(1, '取卡', '', inCur === 'USD' ? 0 : amt, inCur === 'USD' ? amt : 0);
+          return;
+        }
+        if (t.type === 'income' && toCash) {
+          if (t.is_freight && !note.startsWith('付')) return; // 已进客户收款
+          if (note.includes('借款')) { push(2, '借款', '', inCur === 'USD' ? 0 : t.to_amount || t.amount || 0, inCur === 'USD' ? t.to_amount || t.amount || 0 : 0); return; }
+          push(3, '业务员收', '', inCur === 'USD' ? 0 : t.to_amount || t.amount || 0, inCur === 'USD' ? t.to_amount || t.amount || 0 : 0);
+          return;
+        }
+        if (t.type === 'expense' && fromCash) {
+          const amt = t.from_amount || t.amount || 0;
+          const isRub = outCur === 'RUB';
+          if (isCustomsNote(note)) { push(5, '付清关', /^付A177/.test(note) ? 'A177' : note.replace(/^付/, '').trim(), isRub ? -amt : 0, isRub ? 0 : -amt); return; }
+          if (note.includes('还借款')) { push(6, '还借款', '', isRub ? -amt : 0, isRub ? 0 : -amt); return; }
+          if (note.includes('库房费')) { push(7, '库房费', '', isRub ? -amt : 0, isRub ? 0 : -amt); return; }
+          if (note.includes('赔偿')) { push(8, '退客户赔偿', '', isRub ? -amt : 0, isRub ? 0 : -amt); return; }
+          push(9, note || '无备注', '', isRub ? -amt : 0, isRub ? 0 : -amt);
+          return;
+        }
+        // 其余涉及现金的流水（转出/其他换汇等）兜底
+        if (fromCash) {
+          const amt = t.from_amount || t.amount || 0;
+          const isRub = outCur === 'RUB';
+          push(9, note || '无备注', '', isRub ? -amt : 0, isRub ? 0 : -amt);
+        } else {
+          const amt = t.to_amount || t.amount || 0;
+          push(9, note || '无备注', '', inCur === 'USD' ? 0 : amt, inCur === 'USD' ? amt : 0);
+        }
+      });
+      cats.sort((a, b) => a.order - b.order);
+      cats.forEach(c => {
+        cashRows.push({ t: 'data', vals: [c.label, c.label2, c.rub ? round2(c.rub / 10000) : '', c.usd ? Math.round(c.usd) : ''] });
+        rubBal += c.rub; usdBal += c.usd;
+      });
+      // 合计
+      cashRows.push({ t: 'total', vals: ['合计：', '', round2(rubBal / 10000), Math.round(usdBal)] });
+      cashRows.push({ t: 'blank', vals: [] });
+
+      // ---------- 卡总结 ----------
+      cardRows.push({ t: 'date', vals: [dateLabel(day), ...cardCols.map(() => '')], day });
+      cardRows.push({ t: 'blank', vals: [] });
+      cardRows.push({ t: 'header', vals: ['', ...cardCols] });
+      cardRows.push({ t: 'open', vals: ['原存', ...cardCols.map(n => cardBal.get(n) || '')] });
+      dayTxs.forEach(t => {
+        const fromName = accName(t.from_account_id);
+        const toName = accName(t.to_account_id);
+        if (!cardCols.includes(fromName) && !cardCols.includes(toName)) return;
+        const vals: any[] = [(t.notes || '').trim() || '无备注'];
+        cardCols.forEach(n => {
+          let v: number | '' = '';
+          if (n === fromName) v = -(t.from_amount || t.amount || 0);
+          if (n === toName) v = t.to_amount || t.amount || 0;
+          vals.push(v);
+        });
+        cardRows.push({ t: 'data', vals });
+        cardCols.forEach((n, i) => {
+          const v = vals[i + 1];
+          if (typeof v === 'number' && v !== 0) cardBal.set(n, (cardBal.get(n) || 0) + v);
+        });
+      });
+      cardRows.push({ t: 'total', vals: [`${Number(day.slice(5, 7))}月${Number(day.slice(8, 10))}日合计`, ...cardCols.map(n => cardBal.get(n) || 0)] });
+      cardRows.push({ t: 'blank', vals: [] });
+    });
+
+    // ===== 生成 Excel 样式工具 =====
+    const thin: any = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+    const borderAll = { top: thin, bottom: thin, left: thin, right: thin };
+    const downloadWorkbook = async (rows: { t: string; vals: any[] }[], fileName: string, colWidths: number[]) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Sheet1');
+      rows.forEach(r => r.vals.length ? ws.addRow(r.vals) : ws.addRow([]));
+      colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      rows.forEach((r, idx) => {
+        const excelRow = ws.getRow(idx + 1);
+        if (r.t === 'blank') return;
+        for (let c = 0; c < r.vals.length; c++) {
+          const cell = excelRow.getCell(c + 1);
+          const v = r.vals[c];
+          const isNum = typeof v === 'number';
+          cell.border = borderAll;
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          if (r.t === 'date') {
+            cell.font = { bold: true, size: 16 };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
+            ws.mergeCells(idx + 1, 1, idx + 1, r.vals.length);
+          } else if (r.t === 'header') {
+            cell.font = { bold: true, size: 14 };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
+          } else if (r.t === 'open' || r.t === 'total') {
+            cell.font = { bold: true, size: 14 };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+          } else if (r.t === 'data') {
+            cell.font = { size: 14 };
+            if (isNum && v < 0) cell.font = { size: 14, color: { argb: 'FFCC0000' } };
+            else if (isNum && v > 0) cell.font = { size: 14, color: { argb: 'FF008000' } };
+          } else {
+            cell.font = { size: 14 };
+            if (isNum && v < 0) cell.font = { size: 14, color: { argb: 'FFCC0000' } };
+            else if (isNum && v > 0) cell.font = { size: 14, color: { argb: 'FF008000' } };
+          }
+        }
+      });
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    };
+
+    const rangeStr = `${start.replace(/-/g, '')}-${end.slice(5).replace(/-/g, '')}`;
+    await downloadWorkbook(cashRows, `现金总结_${rangeStr}.xlsx`, [26, 14, 12, 12]);
+    await downloadWorkbook(cardRows, `卡总结_${rangeStr}.xlsx`, [30, ...cardCols.map(() => 14)]);
+    message.success('已导出 现金总结 和 卡总结 两个文件');
+  };
+
   // 快速录入：解析文本
   const handleQuickParse = () => {
     if (!quickInputText.trim()) return;
@@ -1148,6 +1386,13 @@ export default function AdminRecords() {
             style={{ width: 120 }}
           />
           <Button type="primary" icon={<ExportOutlined />} onClick={handleExportMonthlySummary}>导出月度总结</Button>
+          <DatePicker.RangePicker
+            value={ledgerRange}
+            onChange={(dates) => { if (dates && dates[0] && dates[1]) setLedgerRange([dates[0], dates[1]]); }}
+            allowClear={false}
+            style={{ width: 230 }}
+          />
+          <Button icon={<ExportOutlined />} onClick={handleExportLedger}>导出对账表格</Button>
         </Space>
       </div>
 

@@ -102,6 +102,12 @@ export default function AdminPurchases() {
   const [editingRow, setEditingRow] = useState<PurchaseSummary | null>(null);
   const [form, setForm] = useState({ customer_id: '', customer_code: '', currency: 'RMB', quoted_price: '', actual_cost: '', customer_deposit: '', status: 'in_progress', notes: '' });
 
+  // 批量添加
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchForm, setBatchForm] = useState({ spId: '', currency: 'RMB', status: 'in_progress', text: '' });
+  const [batchPreview, setBatchPreview] = useState<{ line: number; code: string; quoted: number | null; actual: number | null; error?: string; isNew: boolean }[]>([]);
+
   useEffect(() => {
     loadLookups();
   }, []);
@@ -244,39 +250,59 @@ export default function AdminPurchases() {
     setModalOpen(true);
   };
 
+  // 查找或自动创建客户（单独新增和批量添加共用）
+  const ensureCustomer = async (code: string, spId: string): Promise<{ custId: string; salespersonId: string; created: boolean }> => {
+    const found = customers.find(c => c.code.toUpperCase() === code.toUpperCase());
+    if (found) return { custId: found.id, salespersonId: found.salesperson_id || spId, created: false };
+    const { data: newCust } = await supabase.from('customers').insert({
+      code: code.toUpperCase(),
+      salesperson_id: spId || null,
+    }).select('id').single();
+    if (newCust) {
+      await loadLookups();
+      return { custId: newCust.id, salespersonId: spId, created: true };
+    }
+    throw new Error('客户创建失败');
+  };
+
+  // 自动匹配该客户未关联的采购流水（容差1元内自动关联）
+  const autoMatchPurchase = async (purchaseId: string, custId: string, quotedPrice: number): Promise<{ kind: 'success' | 'warning' | 'info' | ''; text: string }> => {
+    const { data: matchTxs } = await supabase.from('transactions')
+      .select('id, theoretical_cost, amount')
+      .eq('customer_id', custId)
+      .eq('business_type', 'purchase')
+      .eq('is_deleted', false)
+      .is('purchase_id', null);
+    if (!matchTxs || matchTxs.length === 0) return { kind: '', text: '' };
+    const totalCost = matchTxs.reduce((sum: number, t: any) => sum + (t.theoretical_cost || t.amount || 0), 0);
+    const diff = Math.abs(totalCost - quotedPrice);
+    if (diff <= 1) {
+      for (const t of matchTxs) {
+        await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', t.id);
+      }
+      const deposit = totalCost > quotedPrice ? `（客户多打 ${(totalCost - quotedPrice).toFixed(2)}元，记为存款）` : '';
+      return { kind: 'success', text: `已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）${deposit}` };
+    }
+    if (totalCost > quotedPrice) {
+      return { kind: 'info', text: `客户已打款${totalCost.toFixed(2)}元，超出报价${quotedPrice}共${(totalCost - quotedPrice).toFixed(2)}元，超出部分记为存款` };
+    }
+    if (totalCost > 0) {
+      return { kind: 'warning', text: `⚠️ 客户仅打款${totalCost.toFixed(2)}元，距报价${quotedPrice}还差${(quotedPrice - totalCost).toFixed(2)}元，已标记待补款` };
+    }
+    return { kind: '', text: '' };
+  };
+
   const save = async () => {
     const code = form.customer_code.trim().toUpperCase();
     if (!code) { message.error('请输入客户代号'); return; }
     if (!form.currency) { message.error('请选择币种'); return; }
 
     // 查找或自动创建客户
-    let custId = form.customer_id;
-    const found = customers.find(c => c.code.toUpperCase() === code);
-    if (found) {
-      custId = found.id;
-    }
-    if (!custId || custId !== found?.id) {
-      if (!found) {
-        // 自动创建
-        const spId = salespersons[0]?.id || '';
-        const { data: newCust } = await supabase.from('customers').insert({
-          code,
-          salesperson_id: spId || null,
-        }).select('id').single();
-        if (newCust) {
-          custId = newCust.id;
-          // 刷新客户列表
-          loadLookups();
-        }
-      } else {
-        custId = found.id;
-      }
-    }
+    const { custId, salespersonId } = await ensureCustomer(code, salespersons[0]?.id || '');
 
-    const cust = customers.find(c => c.id === custId) || found;
     const payload: any = {
       customer_id: custId,
-      salesperson_id: cust?.salesperson_id || salespersons[0]?.id || '',
+      salesperson_id: salespersonId || salespersons[0]?.id || '',
       currency: form.currency,
       quoted_price: form.quoted_price ? parseFloat(form.quoted_price) : null,
       actual_cost: form.actual_cost ? parseFloat(form.actual_cost) : null,
@@ -301,36 +327,97 @@ export default function AdminPurchases() {
 
     // 自动匹配：查找该客户未关联的采购流水
     if (purchaseId && custId && quotedPrice > 0) {
-      const { data: matchTxs } = await supabase.from('transactions')
-        .select('id, theoretical_cost, amount, currency, type, exchange_rate')
-        .eq('customer_id', custId)
-        .eq('business_type', 'purchase')
-        .eq('is_deleted', false)
-        .is('purchase_id', null);
-
-      if (matchTxs && matchTxs.length > 0) {
-        // 累加理论成本
-        const totalCost = matchTxs.reduce((sum: number, t: any) => {
-          return sum + (t.theoretical_cost || t.amount || 0);
-        }, 0);
-
-        // 容差 ≤1元 自动关联
-        const diff = Math.abs(totalCost - quotedPrice);
-        if (diff <= 1) {
-          for (const t of matchTxs) {
-            await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', t.id);
-          }
-          const deposit = totalCost > quotedPrice ? `（客户多打 ${(totalCost - quotedPrice).toFixed(2)}元，记为存款）` : '';
-          message.success(`已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）${deposit}`);
-        } else if (totalCost > quotedPrice) {
-          message.info(`客户已打款${totalCost.toFixed(2)}元，超出报价${quotedPrice}共${diff.toFixed(2)}元，超出部分记为存款`);
-        } else if (totalCost < quotedPrice && totalCost > 0) {
-          message.warning(`⚠️ 客户仅打款${totalCost.toFixed(2)}元，距报价${quotedPrice}还差${diff.toFixed(2)}元，已标记待补款`);
-        }
+      const matchResult = await autoMatchPurchase(purchaseId, custId, quotedPrice);
+      if (matchResult.text) {
+        if (matchResult.kind === 'success') message.success(matchResult.text);
+        else if (matchResult.kind === 'warning') message.warning(matchResult.text);
+        else message.info(matchResult.text);
       }
     }
 
     setModalOpen(false);
+    loadData();
+  };
+
+  // 批量添加：解析文本
+  const parseBatch = () => {
+    const lines = batchForm.text.split(/\r?\n/);
+    const rows: { line: number; code: string; quoted: number | null; actual: number | null; error?: string; isNew: boolean }[] = [];
+    lines.forEach((raw, idx) => {
+      const line = raw.trim();
+      if (!line) return;
+      const parts = line.split(/[\s\t]+/).filter(Boolean);
+      if (parts.length < 2 || parts.length > 3) {
+        rows.push({ line: idx + 1, code: '', quoted: null, actual: null, isNew: false, error: '格式不对：应为 客户代号 报价 实际支出' });
+        return;
+      }
+      const code = parts[0].toUpperCase();
+      const quoted = parseFloat(parts[1]);
+      if (isNaN(quoted)) {
+        rows.push({ line: idx + 1, code, quoted: null, actual: null, isNew: false, error: '报价不是数字' });
+        return;
+      }
+      let actual: number | null = null;
+      if (parts.length >= 3) {
+        actual = parseFloat(parts[2]);
+        if (isNaN(actual)) {
+          rows.push({ line: idx + 1, code, quoted, actual: null, isNew: false, error: '实际支出不是数字' });
+          return;
+        }
+      }
+      const isNew = !customers.some(c => c.code.toUpperCase() === code);
+      rows.push({ line: idx + 1, code, quoted, actual, isNew });
+    });
+    setBatchPreview(rows);
+    if (rows.length === 0) message.info('没有可解析的内容');
+  };
+
+  // 批量添加：保存
+  const saveBatch = async () => {
+    const valid = batchPreview.filter(r => !r.error);
+    if (valid.length === 0) { message.warning('没有可保存的行，请先点「解析预览」'); return; }
+    const spId = batchForm.spId || salespersons[0]?.id || '';
+    setBatchLoading(true);
+    let ok = 0, newCust = 0, matched = 0;
+    const errors: string[] = [];
+    // 同一批里相同代号只创建一次客户
+    const custCache = new Map<string, { custId: string; created: boolean }>();
+    for (const r of valid) {
+      try {
+        let entry = custCache.get(r.code);
+        if (!entry) {
+          const res = await ensureCustomer(r.code, spId);
+          entry = { custId: res.custId, created: res.created };
+          custCache.set(r.code, entry);
+        }
+        if (entry.created) newCust++;
+        const { data: inserted, error: insertErr } = await supabase.from('purchases').insert({
+          customer_id: entry.custId,
+          salesperson_id: spId,
+          currency: batchForm.currency,
+          quoted_price: r.quoted,
+          actual_cost: r.actual,
+          customer_deposit: 0,
+          status: batchForm.status,
+          user_id: users[0]?.id || '',
+        }).select('id').single();
+        if (insertErr) { errors.push(`第${r.line}行 ${r.code}: ${insertErr.message}`); continue; }
+        ok++;
+        if (inserted && entry.custId && r.quoted && r.quoted > 0) {
+          const res = await autoMatchPurchase(inserted.id, entry.custId, r.quoted);
+          if (res.kind === 'success') matched++;
+        }
+      } catch (e: any) {
+        errors.push(`第${r.line}行 ${r.code}: ${e?.message || '保存失败'}`);
+      }
+    }
+    message.success(`批量添加完成：成功 ${ok} 条，新建客户 ${newCust} 个，自动匹配流水 ${matched} 条` +
+      (errors.length ? `；失败 ${errors.length} 行：${errors.join('；')}` : ''));
+    setBatchLoading(false);
+    setBatchOpen(false);
+    setBatchForm({ spId: '', currency: 'RMB', status: 'in_progress', text: '' });
+    setBatchPreview([]);
+    loadLookups();
     loadData();
   };
 
@@ -445,6 +532,11 @@ export default function AdminPurchases() {
         <h2 style={{ margin: 0 }}>🛒 采购管理</h2>
         <Space>
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>新增采购</Button>
+          <Button icon={<PlusOutlined />} onClick={() => {
+            setBatchForm({ spId: salespersons[0]?.id || '', currency: 'RMB', status: 'in_progress', text: '' });
+            setBatchPreview([]);
+            setBatchOpen(true);
+          }}>批量添加</Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
           <Button onClick={async () => {
             const monthStart = dayjs().startOf('month').toISOString();
@@ -712,6 +804,62 @@ export default function AdminPurchases() {
             </div>
           )}
         </Form>
+      </Modal>
+
+      {/* 批量添加弹窗 */}
+      <Modal
+        title="批量添加采购"
+        open={batchOpen}
+        onCancel={() => setBatchOpen(false)}
+        onOk={saveBatch}
+        okText="确认批量添加"
+        confirmLoading={batchLoading}
+        width={680}
+      >
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Select
+            placeholder="业务员（新客户挂到该业务员）" style={{ width: 220 }}
+            value={batchForm.spId || undefined}
+            onChange={(v) => setBatchForm({ ...batchForm, spId: v || '' })}
+            options={salespersons.map(s => ({ label: s.name, value: s.id }))}
+          />
+          <Select style={{ width: 100 }} value={batchForm.currency}
+            onChange={(v) => setBatchForm({ ...batchForm, currency: v })}
+            options={CURRENCIES.filter(Boolean).map(c => ({ label: c, value: c }))}
+          />
+          <Select style={{ width: 110 }} value={batchForm.status}
+            onChange={(v) => setBatchForm({ ...batchForm, status: v })}
+            options={PURCHASE_STATUSES.map(s => ({ label: s.label, value: s.value }))}
+          />
+        </Space>
+        <Input.TextArea
+          rows={10}
+          value={batchForm.text}
+          onChange={(e) => setBatchForm({ ...batchForm, text: e.target.value })}
+          placeholder={'每行一条：客户代号 报价 实际支出（空格隔开，实际支出可省略）\n例：\nZY4567 2599 2400\nBF9009 16005 11005\n客户代号不存在会自动创建，保存后自动匹配流水'}
+        />
+        <div style={{ marginTop: 8 }}>
+          <Button onClick={parseBatch}>解析预览</Button>
+          <span style={{ marginLeft: 12, color: '#999', fontSize: 12 }}>确认前先解析，格式错误的行不会保存</span>
+        </div>
+        {batchPreview.length > 0 && (
+          <Table
+            size="small" style={{ marginTop: 8 }} rowKey="line" pagination={false}
+            dataSource={batchPreview}
+            columns={[
+              { title: '行', dataIndex: 'line', width: 50 },
+              { title: '客户代号', dataIndex: 'code', width: 140, render: (v: string, r: any) => r.error ? <span style={{ color: '#ff4d4f' }}>{v || '—'}</span> : v },
+              { title: '报价', dataIndex: 'quoted', width: 90, render: (v: number | null) => v == null ? '' : v },
+              { title: '实际支出', dataIndex: 'actual', width: 90, render: (v: number | null) => v == null ? '' : v },
+              {
+                title: '状态', key: 'st', width: 200,
+                render: (_: any, r: any) => r.error
+                  ? <Tag color="red">{r.error}</Tag>
+                  : r.isNew ? <Tag color="orange">新客户（自动创建）</Tag> : <Tag color="green">已有客户</Tag>,
+              },
+            ]}
+          />
+        )}
       </Modal>
     </div>
   );

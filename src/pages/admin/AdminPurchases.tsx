@@ -105,6 +105,7 @@ export default function AdminPurchases() {
   // 批量添加
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [matchLoading, setMatchLoading] = useState(false);
   const [batchForm, setBatchForm] = useState({ spId: '', currency: 'RMB', status: 'in_progress', text: '' });
   const [batchPreview, setBatchPreview] = useState<{ line: number; code: string; quoted: number | null; actual: number | null; error?: string; isNew: boolean }[]>([]);
 
@@ -265,31 +266,54 @@ export default function AdminPurchases() {
     throw new Error('客户创建失败');
   };
 
-  // 自动匹配该客户未关联的采购流水（容差1元内自动关联）
-  const autoMatchPurchase = async (purchaseId: string, custId: string, quotedPrice: number): Promise<{ kind: 'success' | 'warning' | 'info' | ''; text: string }> => {
+  // 子集匹配: 未关联流水中找 1~3 笔组合，理论成本合计与报价差 ≤1 元（笔数少优先，其次差额小）
+  const findMatch = (txs: { id: string; cost: number }[], target: number): { ids: string[]; diff: number; totalCost: number } | null => {
+    const tol = 1;
+    let best: { ids: string[]; diff: number; totalCost: number } | null = null;
+    const consider = (ids: string[], sum: number) => {
+      const d = Math.abs(sum - target);
+      if (d > tol) return;
+      if (!best || ids.length < best.ids.length || (ids.length === best.ids.length && d < best.diff - 1e-9)) {
+        best = { ids, diff: d, totalCost: sum };
+      }
+    };
+    txs.forEach(t => consider([t.id], t.cost));
+    for (let i = 0; i < txs.length; i++)
+      for (let j = i + 1; j < txs.length; j++)
+        consider([txs[i].id, txs[j].id], txs[i].cost + txs[j].cost);
+    for (let i = 0; i < txs.length; i++)
+      for (let j = i + 1; j < txs.length; j++)
+        for (let k = j + 1; k < txs.length; k++)
+          consider([txs[i].id, txs[j].id, txs[k].id], txs[i].cost + txs[j].cost + txs[k].cost);
+    return best;
+  };
+
+  // 自动匹配该客户未关联的采购流水（子集匹配，不限日期，容差1元内自动关联）
+  const autoMatchPurchase = async (purchaseId: string, custId: string, quotedPrice: number): Promise<{ kind: 'success' | 'warning' | 'info' | ''; text: string; count: number }> => {
     const { data: matchTxs } = await supabase.from('transactions')
       .select('id, theoretical_cost, amount')
       .eq('customer_id', custId)
       .eq('business_type', 'purchase')
       .eq('is_deleted', false)
       .is('purchase_id', null);
-    if (!matchTxs || matchTxs.length === 0) return { kind: '', text: '' };
-    const totalCost = matchTxs.reduce((sum: number, t: any) => sum + (t.theoretical_cost || t.amount || 0), 0);
-    const diff = Math.abs(totalCost - quotedPrice);
-    if (diff <= 1) {
-      for (const t of matchTxs) {
-        await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', t.id);
+    if (!matchTxs || matchTxs.length === 0) return { kind: '', text: '', count: 0 };
+    const txs = matchTxs.map((t: any) => ({ id: t.id, cost: t.theoretical_cost || t.amount || 0 }));
+    const match = findMatch(txs, quotedPrice);
+    if (match) {
+      for (const id of match.ids) {
+        await supabase.from('transactions').update({ purchase_id: purchaseId }).eq('id', id);
       }
-      const deposit = totalCost > quotedPrice ? `（客户多打 ${(totalCost - quotedPrice).toFixed(2)}元，记为存款）` : '';
-      return { kind: 'success', text: `已自动关联 ${matchTxs.length} 笔流水（合计${totalCost.toFixed(2)}元）${deposit}` };
+      const deposit = match.totalCost > quotedPrice ? `（客户多打 ${(match.totalCost - quotedPrice).toFixed(2)}元，记为存款）` : '';
+      return { kind: 'success', text: `已自动关联 ${match.ids.length} 笔流水（合计${match.totalCost.toFixed(2)}元）${deposit}`, count: match.ids.length };
     }
+    const totalCost = txs.reduce((s, t) => s + t.cost, 0);
     if (totalCost > quotedPrice) {
-      return { kind: 'info', text: `客户已打款${totalCost.toFixed(2)}元，超出报价${quotedPrice}共${(totalCost - quotedPrice).toFixed(2)}元，超出部分记为存款` };
+      return { kind: 'info', text: `客户未关联打款合计${totalCost.toFixed(2)}元，超出报价${quotedPrice}共${(totalCost - quotedPrice).toFixed(2)}元，但无法按报价拆开匹配`, count: 0 };
     }
     if (totalCost > 0) {
-      return { kind: 'warning', text: `⚠️ 客户仅打款${totalCost.toFixed(2)}元，距报价${quotedPrice}还差${(quotedPrice - totalCost).toFixed(2)}元，已标记待补款` };
+      return { kind: 'warning', text: `⚠️ 客户未关联打款合计${totalCost.toFixed(2)}元，距报价${quotedPrice}还差${(quotedPrice - totalCost).toFixed(2)}元，已标记待补款`, count: 0 };
     }
-    return { kind: '', text: '' };
+    return { kind: '', text: '', count: 0 };
   };
 
   const save = async () => {
@@ -427,6 +451,24 @@ export default function AdminPurchases() {
     loadData();
   };
 
+  // 一键自动匹配：扫描全部待补款采购单，逐张做子集匹配
+  const autoMatchAll = async () => {
+    const pending = data
+      .filter(d => d.status === 'in_progress' && d.shortfall > 1 && d.quoted_price && d.quoted_price > 0)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    if (pending.length === 0) { message.info('没有待匹配的采购单'); return; }
+    setMatchLoading(true);
+    let matchedN = 0, linkedN = 0, warned = 0;
+    for (const p of pending) {
+      const res = await autoMatchPurchase(p.id, p.customer_id, p.quoted_price as number);
+      if (res.kind === 'success') { matchedN++; linkedN += res.count; }
+      else if (res.kind === 'warning') warned++;
+    }
+    setMatchLoading(false);
+    message.success(`自动匹配完成：匹配成功 ${matchedN} 张采购单、关联 ${linkedN} 笔流水${warned ? `；${warned} 张仍待补款` : ''}`);
+    loadData();
+  };
+
   const handleExport = () => {
     const tHeaders = ['客户代号', '打款日期', '币种', '金额', '汇率', '理论成本', '报价', '实际支出', '利润', '状态'];
     const tRows = combinedRows.map(r => [
@@ -537,6 +579,7 @@ export default function AdminPurchases() {
             setBatchPreview([]);
             setBatchOpen(true);
           }}>批量添加</Button>
+          <Button loading={matchLoading} onClick={autoMatchAll}>一键自动匹配</Button>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出CSV</Button>
           <Button onClick={async () => {
             const monthStart = dayjs().startOf('month').toISOString();
